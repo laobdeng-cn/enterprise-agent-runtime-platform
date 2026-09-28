@@ -1,29 +1,38 @@
 # Frontend
 
-The frontend will become the operations console for the Agent Runtime Platform.
+Vue 3 + TypeScript operations console for Enterprise Agent Runtime Platform.
 
-## Planned stack
+## Phase 1 contents
 
 - Vue 3
 - TypeScript
 - Vite
 - Element Plus
-- SSE for live run events
+- responsive engineering-status page
+- backend health proxy
 
-## Planned console modules
+The Phase 1 page calls `/health` through Vite and displays Backend, PostgreSQL and Redis status.
 
-- Dashboard
-- Agent Management
-- Skill Registry
-- MCP Server Registry
-- Workflow Designer / Inspector
-- Agent Run Console
-- Trace Timeline
-- Workspace / Artifact Browser
-- Memory Inspector
-- Context Inspector
-- Approval Center
-- Evaluation Center
-- User / Role / Permission Management
+## Local development
 
-The frontend is intentionally not implemented in Phase 0. Runtime contracts are designed first so the UI reflects durable backend concepts rather than driving the architecture.
+```bash
+npm install
+npm run dev
+```
+
+When the backend is running outside Docker on port 8000, no additional configuration is required.
+
+For Docker Compose, the root configuration supplies:
+
+```text
+VITE_BACKEND_PROXY_TARGET=http://backend:8000
+```
+
+## Build / type check
+
+```bash
+npm run build
+npm run typecheck
+```
+
+Later phases will evolve this skeleton into Agent Management, Skill Registry, Run Trace, Workspace, Approval and Evaluation consoles.
