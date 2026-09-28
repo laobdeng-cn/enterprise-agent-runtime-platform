@@ -152,7 +152,7 @@ def test_workspace_publishes_artifact_inside_artifacts_boundary(
     assert metadata["relative_path"] == (
         f"artifacts/{artifact_id}/analysis.md"
     )
-    assert metadata["size_bytes"] == len("# Report".encode())
+    assert metadata["size_bytes"] == len(b"# Report")
     artifact_path = storage.artifact_path(
         run_id,
         str(metadata["relative_path"]),
