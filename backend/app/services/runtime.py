@@ -25,6 +25,7 @@ from app.runtime.state_machine import (
 from app.schemas.runtime import RunCreate
 from app.services.agents import AgentHasNoActiveVersionError, get_agent
 from app.services.auth import get_user_by_id, permission_codes
+from app.services.workspaces import create_workspace
 
 
 class RunNotFoundError(LookupError):
@@ -204,6 +205,7 @@ async def create_run(
     )
     session.add(run)
     await session.flush()
+    await create_workspace(session, run.id)
 
     input_step = await _append_step(
         session,
