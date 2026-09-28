@@ -520,11 +520,11 @@ async def execute_run(
                 "message": "Run creator is unavailable or inactive",
             }
             run = await get_run(session, run.id, for_update=True)
-            model_step = await session.get(RunStep, model_step.id)
-            if model_step is not None:
-                model_step.status = "FAILED"
-                model_step.error_data = error
-                model_step.completed_at = _now()
+            persisted_principal_step = await session.get(RunStep, model_step.id)
+            if persisted_principal_step is not None:
+                persisted_principal_step.status = "FAILED"
+                persisted_principal_step.error_data = error
+                persisted_principal_step.completed_at = _now()
             _transition(run, RunState.FAILED)
             run.error_data = error
             await _append_checkpoint(session, run, kind="failed", payload={"error": error})
