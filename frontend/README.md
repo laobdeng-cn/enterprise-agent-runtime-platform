@@ -2,40 +2,42 @@
 
 Vue 3 + TypeScript operations console for Enterprise Agent Runtime Platform.
 
-## Current Phase 2 contents
+## Current Phase 3 contents
 
-- Vue 3
-- TypeScript
-- Vite
-- Element Plus
-- dependency health status
-- JWT sign-in form
-- current principal viewer
-- role and permission display
-- backend proxy for `/health` and `/api`
+- infrastructure health status
+- JWT sign-in
+- current-principal / permission display
+- Agent v1 creation
+- Agent list and version count
+- Harness preview form
+- normalized model result metadata
 
-The browser stores the current access token in `sessionStorage`, not persistent local storage. This is sufficient for the development console; production session hardening is deferred until deployment/security hardening phases.
+The preview page calls:
 
-## Local development
+```text
+POST /api/agents/{agent_id}/preview
+```
+
+A real response requires the backend to have a valid `DEEPSEEK_API_KEY`.
+
+## Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-When the backend is running outside Docker on port 8000, no additional configuration is required.
-
-For Docker Compose, the root configuration supplies:
+Docker Compose supplies:
 
 ```text
 VITE_BACKEND_PROXY_TARGET=http://backend:8000
 ```
 
-## Build / type check
+Validation:
 
 ```bash
-npm run build
 npm run typecheck
+npm run build
 ```
 
-Later phases will evolve this console into Agent Management, Skill Registry, Run Trace, Workspace, Approval and Evaluation views.
+Later phases add Skill Registry, durable Run timelines, Workspace, Approval, Trace and Evaluation views.

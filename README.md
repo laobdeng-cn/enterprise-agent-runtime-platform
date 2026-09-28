@@ -2,88 +2,61 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-2%20authentication%20%26%20RBAC-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-3%20Agent%20Harness-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
 [![FastAPI](https://img.shields.io/badge/FastAPI-active-success)](#technology-stack)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-informational)](#technology-stack)
-[![Vue](https://img.shields.io/badge/Vue-3-success)](#technology-stack)
+[![DeepSeek](https://img.shields.io/badge/DeepSeek-provider-informational)](#agent-harness)
 
 ## Overview
 
-Enterprise Agent Runtime Platform is designed to move beyond a simple LLM chat application. The target platform provides a controlled execution environment in which an Agent can plan work, call governed capabilities, operate in isolated workspaces, pause for approval, recover from checkpoints, and expose complete traces and evaluations.
+Enterprise Agent Runtime Platform is designed to move beyond a simple LLM chat application. It separates model reasoning from authorization, durable execution, tools, sandboxing, approvals, observability, and evaluation.
 
-**Phase 2 is implemented.** The platform now has a durable identity and RBAC foundation before Agent execution is introduced.
+**Phase 3 is implemented.** The project now has authenticated versioned Agents and a provider-independent Agent Harness with a DeepSeek adapter.
 
-## Core Security Principle
-
-The LLM may reason and propose actions, but it never authenticates a user or grants authorization.
+## Core Boundary
 
 ```text
-User Credentials
-      |
-      v
-Argon2 Verification
-      |
-      v
-JWT Access Token
-      |
-      v
-Current Principal
+Authenticated User
       |
       v
 RBAC
       |
       v
-Protected Platform Capability
+Agent Application Service
+      |
+      v
+Agent Harness
+      |
+      +--> Context Builder
+      +--> Lifecycle Hooks
+      +--> Model Provider Registry
+                |
+                v
+           DeepSeek Provider
 ```
 
-Later phases add Tool/Skill policy and human approval on top of this first authorization gate.
+The LLM may generate content and later propose actions, but it never grants permissions or bypasses the control plane.
 
-## Current Runtime Topology
+## Agent Harness
 
-```text
-Browser :5173
-   |
-   | /api + /health
-   v
-FastAPI :8000
-   |
-   +--> PostgreSQL 16
-   |      |
-   |      +--> users
-   |      +--> roles
-   |      +--> permissions
-   |      +--> user_roles
-   |      +--> role_permissions
-   |
-   +--> Redis 7
-```
+Phase 3 introduces:
 
-## Phase 2 Features
+- stable `Agent` identity;
+- immutable-style `AgentVersion` execution configurations;
+- active-version switching;
+- normalized `ModelRequest` and `ModelResponse`;
+- normalized token usage;
+- provider error classification;
+- provider registry;
+- DeepSeek adapter;
+- basic Context Package;
+- lifecycle hooks;
+- Harness preview execution.
 
-- User, Role and Permission persistence
-- many-to-many User ↔ Role
-- many-to-many Role ↔ Permission
-- Argon2 password hashing
-- JWT access-token issuance and validation
-- database-backed current-principal resolution
-- reusable `require_permissions(...)` dependency
-- HTTP 401 vs 403 separation
-- idempotent default RBAC seed
-- optional bootstrap admin
-- admin-only RBAC inspection APIs
-- frontend sign-in/current-principal view
-- CI authentication + authorization smoke test
+A model call is still **not** a durable Run. Phase 5 introduces `AgentRun`, `RunStep`, checkpoints, pause/resume/cancel and bounded retry.
 
 ## Quick Start
-
-Requirements:
-
-- Docker Desktop / Docker Engine
-- Docker Compose v2
-
-Clone and configure:
 
 ```bash
 git clone https://github.com/laobdeng-cn/enterprise-agent-runtime-platform.git
@@ -91,13 +64,18 @@ cd enterprise-agent-runtime-platform
 cp .env.example .env
 ```
 
-Before first startup, set at least a local JWT secret and optional bootstrap administrator in `.env`:
+Configure local authentication and DeepSeek:
 
 ```text
 JWT_SECRET_KEY=replace-with-a-long-random-development-secret
+
 BOOTSTRAP_ADMIN_USERNAME=admin
 BOOTSTRAP_ADMIN_PASSWORD=choose-a-local-password
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+
+DEEPSEEK_API_KEY=<your-key>
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_TIMEOUT_SECONDS=60
 ```
 
 Start:
@@ -113,95 +91,115 @@ Open:
 | Frontend | http://localhost:5173 |
 | FastAPI OpenAPI | http://localhost:8000/docs |
 | Health | http://localhost:8000/health |
-| Liveness | http://localhost:8000/health/live |
 
-## Authentication API
+## Agent APIs
 
-Login:
+Create a versioned Agent:
 
 ```http
-POST /api/auth/login
+POST /api/agents
+Authorization: Bearer <token>
 Content-Type: application/json
+```
 
+```json
 {
-  "username": "admin",
-  "password": "..."
+  "name": "research-assistant",
+  "description": "Enterprise research helper",
+  "system_instructions": "You are a concise enterprise assistant.",
+  "model_provider": "deepseek",
+  "model_name": "deepseek-chat",
+  "temperature": 0.2
 }
 ```
 
-Current principal:
+Execute a non-durable Harness preview:
 
 ```http
-GET /api/auth/me
-Authorization: Bearer <access-token>
+POST /api/agents/{agent_id}/preview
+Authorization: Bearer <token>
+Content-Type: application/json
 ```
 
-Admin RBAC inspection:
-
-```http
-GET /api/rbac/roles
-GET /api/rbac/permissions
-Authorization: Bearer <admin-token>
+```json
+{
+  "input": "Summarize this task.",
+  "additional_context": []
+}
 ```
 
-## Default Roles
+Version-management endpoints:
 
-| Role | Purpose |
-| --- | --- |
-| `admin` | Platform administration and all current permissions |
-| `agent_developer` | Agent/Skill/Run development and evaluation |
-| `business_user` | Runs approved Agents and consumes outputs |
-| `approver` | Reviews policy-gated actions |
+```text
+GET  /api/agents
+GET  /api/agents/{agent_id}
+POST /api/agents/{agent_id}/versions
+POST /api/agents/{agent_id}/versions/{version_id}/activate
+```
 
-Roles are permission bundles; application code checks atomic permissions rather than branching on role names.
+## Current Persistence
+
+```text
+users
+roles
+permissions
+user_roles
+role_permissions
+
+agents
+agent_versions
+```
+
+`Agent.active_version_id` points to the execution configuration currently selected for new preview calls.
 
 ## Technology Stack
 
 | Layer | Choice |
 | --- | --- |
 | Backend | Python 3.12, FastAPI, Pydantic v2 |
-| Authentication | Argon2 via pwdlib, JWT via PyJWT |
-| Persistence | SQLAlchemy 2, Alembic, psycopg |
-| Primary database | PostgreSQL 16 |
-| Runtime state / cache | Redis 7 |
+| Authentication | Argon2, JWT |
+| Persistence | SQLAlchemy 2, Alembic, PostgreSQL 16 |
+| Runtime cache | Redis 7 |
 | Frontend | Vue 3, TypeScript, Vite, Element Plus |
+| Model transport | httpx |
+| LLM provider | DeepSeek via internal ModelProvider adapter |
 | Infrastructure | Docker Compose |
 | Quality | pytest, Ruff, mypy, GitHub Actions |
-| Agent orchestration | LangGraph — Phase 3+ |
-| LLM | DeepSeek through internal provider abstraction — Phase 3+ |
-| Protocol | MCP — Phase 10+ |
-| Sandbox | Docker-isolated Python execution — Phase 7+ |
+| Tool orchestration | Phase 4 |
+| Durable runtime / LangGraph | Phase 5+ |
+| MCP | Phase 10 |
+| Sandbox | Phase 7 |
 
-## Safety and Governance Invariants
+## Security / Runtime Invariants
 
-1. **The LLM never grants permissions.**
-2. **Passwords are stored only as one-way Argon2 hashes.**
-3. **JWT identity is re-resolved against the database on protected requests.**
-4. **Inactive or missing users cannot operate with a stale token.**
-5. **Tool input will be validated before execution.**
-6. **Sensitive actions may require human approval.**
-7. **A Run only accesses authorized resources and its assigned Workspace.**
-8. **Externally meaningful actions are traceable.**
+1. The LLM never grants permissions.
+2. API handlers do not call model providers directly.
+3. Provider credentials are environment configuration, not Agent metadata.
+4. Agent execution references a concrete AgentVersion.
+5. Provider failures are normalized before reaching higher runtime layers.
+6. Additional context is treated as untrusted data.
+7. Tool execution will require schema validation and authorization.
+8. Durable retry semantics are deferred to the Runtime rather than hidden inside API handlers.
 
 ## Development Roadmap
 
 ```text
-Phase 0  ✅ Product scope, architecture, contracts, ADRs
-Phase 1  ✅ Engineering skeleton + local infrastructure
+Phase 0  ✅ Architecture & Contracts
+Phase 1  ✅ Engineering Skeleton
 Phase 2  ✅ Authentication + RBAC
-Phase 3  Agent Harness
-Phase 4  Tool / Skill Registry
-Phase 5  Agent Runtime + durable Run lifecycle
-Phase 6  Workspace + artifacts
-Phase 7  Docker Sandbox
-Phase 8  Memory
-Phase 9  Context Engineering
-Phase 10 MCP + enterprise data sources
-Phase 11 Workflow + Multi-Agent orchestration
-Phase 12 Human-in-the-loop + Policy Engine
-Phase 13 Trace + Observability
-Phase 14 Agent Evaluation + Regression
-Phase 15 Enterprise demonstration scenario + deployment hardening
+Phase 3  ✅ Agent Harness
+Phase 4  ⏭ Tool / Skill Registry
+Phase 5     Durable Agent Runtime
+Phase 6     Workspace + Artifacts
+Phase 7     Docker Sandbox
+Phase 8     Memory
+Phase 9     Context Engineering
+Phase 10    MCP + Enterprise Data
+Phase 11    Workflow + Multi-Agent
+Phase 12    Human-in-the-loop + Policy Engine
+Phase 13    Trace + Observability
+Phase 14    Agent Evaluation + Regression
+Phase 15    Enterprise Demo + Hardening
 ```
 
 ## Documentation
@@ -215,8 +213,7 @@ Phase 15 Enterprise demonstration scenario + deployment hardening
 - [Development Roadmap](docs/06-phase-roadmap.md)
 - [Phase 1 Engineering Skeleton](docs/07-phase1-engineering-skeleton.md)
 - [Phase 2 Authentication & RBAC](docs/08-phase2-auth-rbac.md)
-
-Architecture decisions are maintained under [docs/adr](docs/adr).
+- [Phase 3 Agent Harness](docs/09-phase3-agent-harness.md)
 
 ## License
 

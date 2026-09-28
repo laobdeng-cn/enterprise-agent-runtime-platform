@@ -1,21 +1,24 @@
 # Backend
 
-FastAPI control plane and runtime backend for Enterprise Agent Runtime Platform.
+FastAPI control plane and Agent execution backend for Enterprise Agent Runtime Platform.
 
-## Current Phase 2 contents
+## Current Phase 3 contents
 
 - Python 3.12 / FastAPI
-- Pydantic Settings
 - async SQLAlchemy / PostgreSQL
 - Redis connectivity
 - Alembic migrations
-- User / Role / Permission persistence
-- Argon2 password hashing
-- JWT access tokens
-- current-principal dependency
-- reusable RBAC permission dependency
-- canonical role/permission seed
-- optional bootstrap admin
+- JWT authentication and RBAC
+- versioned `Agent` / `AgentVersion`
+- normalized ModelRequest / ModelResponse contracts
+- ModelProvider abstraction
+- DeepSeek provider adapter
+- Provider Registry
+- basic Context Package / Context Builder
+- Agent Harness runner
+- lifecycle hooks
+- Agent CRUD/version APIs
+- Harness preview API
 - pytest, Ruff, and mypy
 
 ## Local development
@@ -31,41 +34,36 @@ python -m app.scripts.seed_rbac
 uvicorn app.main:app --reload
 ```
 
-On Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-The recommended project workflow remains Docker Compose from the repository root.
-
-## Authentication endpoints
+For an actual model preview configure:
 
 ```text
-POST /api/auth/login
-GET  /api/auth/me
+DEEPSEEK_API_KEY=<your-key>
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_TIMEOUT_SECONDS=60
 ```
 
-Admin-only RBAC inspection:
+## Agent API
 
 ```text
-GET /api/rbac/roles
-GET /api/rbac/permissions
+GET  /api/agents
+POST /api/agents
+GET  /api/agents/{agent_id}
+POST /api/agents/{agent_id}/versions
+POST /api/agents/{agent_id}/versions/{version_id}/activate
+POST /api/agents/{agent_id}/preview
 ```
 
-## Bootstrap admin
+The preview endpoint performs a single model invocation through the Harness. It is not yet a durable AgentRun.
 
-Set these before running the seed command:
+## Harness boundary
 
 ```text
-BOOTSTRAP_ADMIN_USERNAME
-BOOTSTRAP_ADMIN_PASSWORD
-BOOTSTRAP_ADMIN_EMAIL   # optional
+API -> Application Service -> AgentHarness -> Provider Registry -> DeepSeekProvider
 ```
 
-The user is created only when both username and password are present.
+API handlers do not make provider HTTP calls.
 
-## Tests and lint
+## Validation
 
 ```bash
 pytest
@@ -73,6 +71,4 @@ ruff check app tests
 mypy app
 ```
 
-## Boundary rule
-
-HTTP handlers do not contain Agent orchestration logic. The authenticated current principal and RBAC dependency added in Phase 2 are shared security infrastructure for later Agent, Skill, Run, Workspace and MCP modules.
+Phase 4 adds Tool / Skill binding. Phase 5 adds durable Run state, steps, checkpoints and retry semantics.
