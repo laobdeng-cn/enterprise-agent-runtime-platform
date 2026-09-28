@@ -66,6 +66,8 @@ jobs:
       BOOTSTRAP_ADMIN_USERNAME: ci-admin
       BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password-123
       BOOTSTRAP_ADMIN_EMAIL: ci-admin@example.com
+      SANDBOX_TIMEOUT_SECONDS: 2
+      DOCKER_API_VERSION: "1.45"
 
     steps:
       - name: Checkout
@@ -91,7 +93,7 @@ jobs:
         run: |
           SKILLS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/skills)
 
-          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; expected={'system_echo','math_add','text_stats','workspace_list','workspace_read_text','workspace_write_text','artifact_publish'}; assert expected <= names"
+          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; expected={'system_echo','math_add','text_stats','workspace_list','workspace_read_text','workspace_write_text','artifact_publish','python_execute'}; assert expected <= names"
 
           MATH_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); print(next(item['id'] for item in data if item['name']=='math_add'))")
 
@@ -108,10 +110,10 @@ jobs:
               "model_provider":"deepseek",
               "model_name":"deepseek-chat",
               "temperature":0.2,
-              "skills":["workspace_list","workspace_read_text","workspace_write_text","artifact_publish"]
+              "skills":["workspace_list","workspace_read_text","workspace_write_text","artifact_publish","python_execute"]
             }'             http://localhost:8000/api/agents)
 
-          AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; d=json.load(sys.stdin); expected=['artifact_publish','workspace_list','workspace_read_text','workspace_write_text']; assert d['versions'][0]['skills']==expected; print(d['id'])")
+          AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; d=json.load(sys.stdin); skills=set(d['versions'][0]['skills']); assert {'artifact_publish','python_execute','workspace_list','workspace_read_text','workspace_write_text'} <= skills; print(d['id'])")
           echo "AGENT_ID=$AGENT_ID" >> "$GITHUB_ENV"
 
       - name: Create durable Run and Workspace
