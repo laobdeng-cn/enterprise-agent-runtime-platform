@@ -442,6 +442,7 @@ async def execute_run(
         )
 
     retry_policy = RuntimeRetryPolicy(max_attempts=run.max_attempts)
+    paused_execution_allowed = resume
 
     while True:
         run = await get_run(
@@ -456,6 +457,10 @@ async def execute_run(
             await session.commit()
             return await get_run(session, run.id, principal=principal)
 
+        if state == RunState.PAUSED and not paused_execution_allowed:
+            await session.commit()
+            return await get_run(session, run.id, principal=principal)
+
         if state not in {
             RunState.PENDING,
             RunState.PAUSED,
@@ -466,6 +471,7 @@ async def execute_run(
             )
 
         _transition(run, RunState.RUNNING)
+        paused_execution_allowed = False
         run.attempt += 1
         run.pause_requested = False
         if run.started_at is None:
