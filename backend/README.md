@@ -2,48 +2,53 @@
 
 FastAPI control plane and execution backend for Enterprise Agent Runtime Platform.
 
-## Current Phase 5 contents
+## Current Phase 6 contents
 
 - JWT authentication and RBAC
 - versioned Agent / AgentVersion
 - versioned Skill / SkillVersion
 - DeepSeek Agent Harness
 - schema-validated Skill execution
-- durable AgentRun persistence
-- RunStep history
-- ToolCall persistence
-- RunCheckpoint persistence
-- durable RunEvent stream
-- explicit lifecycle state machine
-- bounded runtime retry
-- pause / resume / cancel
-- startup recovery for interrupted Runs
-- SSE Run events
-- Alembic migrations through 0005
+- durable AgentRun / RunStep / ToolCall / Checkpoint / Event persistence
+- bounded retry and restart recovery
+- per-Run Workspace persistence
+- boundary-safe filesystem resolver
+- persistent input / working / artifacts directories
+- workspace quotas and per-file size limits
+- Workspace Skill provider
+- `workspace_list`
+- `workspace_read_text`
+- `workspace_write_text`
+- `artifact_publish`
+- Artifact metadata, SHA-256 and download
+- Alembic migrations through 0006
 
-## Durable execution boundary
+## Workspace boundary
 
 ```text
-Run API
- -> Durable Runtime
- -> Agent Harness
- -> Model / Skills
- -> persisted result, error, steps, tool calls, checkpoints and events
+AgentRun
+  |
+  +--> Workspace
+        ├── input/
+        ├── working/
+        └── artifacts/
 ```
 
-PostgreSQL is authoritative for recovery. Redis is available for later coordination but is not the only copy of Run state.
+Agent filesystem Skills receive workspace-relative paths only.
 
-## Run API
+Traversal, absolute paths, NUL bytes and symlink components are rejected before file access.
+
+## APIs
 
 ```text
-GET  /api/runs
-POST /api/runs
-GET  /api/runs/{run_id}
-POST /api/runs/{run_id}/start
-POST /api/runs/{run_id}/pause
-POST /api/runs/{run_id}/resume
-POST /api/runs/{run_id}/cancel
-GET  /api/runs/{run_id}/events
+GET /api/runs/{run_id}/workspace
+GET /api/runs/{run_id}/workspace/files
+GET /api/runs/{run_id}/workspace/text
+PUT /api/runs/{run_id}/workspace/text
+
+GET  /api/runs/{run_id}/artifacts
+POST /api/runs/{run_id}/artifacts
+GET  /api/runs/{run_id}/artifacts/{artifact_id}/download
 ```
 
 ## Validation
@@ -56,6 +61,6 @@ mypy app
 pytest
 ```
 
-Docker Compose CI additionally validates migration 0005, durable Run creation, restart persistence, normalized execution failure, Run history, checkpoints, and SSE lifecycle events.
+Docker Compose CI also validates Workspace creation, traversal rejection, artifact publication/download and persistence across backend restart.
 
 Manual local validation remains deferred until all phases are complete.

@@ -2,7 +2,7 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-5%20Durable%20Agent%20Runtime-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-6%20Workspace%20%2B%20Artifacts-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-provider-informational)](#technology-stack)
@@ -11,7 +11,7 @@
 
 Enterprise Agent Runtime Platform is a governed execution platform rather than a thin LLM chat wrapper.
 
-**Phase 5 is implemented.** Agents and Skills now execute inside a durable Run lifecycle backed by PostgreSQL, with steps, tool-call records, checkpoints, bounded retry, pause/resume/cancel semantics, persisted SSE events, and restart recovery.
+**Phase 6 is implemented.** Every durable Run now owns an isolated persistent Workspace with safe path resolution, file policies, Run-scoped file Skills, Artifact metadata, checksums and authorized downloads.
 
 ## Current architecture
 
@@ -28,6 +28,10 @@ Authenticated Principal
         +--> RunCheckpoint[]
         +--> RunEvent[]
         +--> ToolCall[]
+        +--> Workspace
+              ├── input/
+              ├── working/
+              └── artifacts/
         |
         v
  Durable Runtime
@@ -102,6 +106,10 @@ Durable Runtime
 ├── tool_calls
 ├── run_checkpoints
 └── run_events
+
+Workspace
+├── workspaces
+└── artifacts
 ```
 
 ## Runtime invariants
@@ -116,6 +124,10 @@ Durable Runtime
 8. PostgreSQL is the source of truth for resumable execution state.
 9. process restart cannot silently erase an active Run.
 10. framework-specific graph state does not replace the platform's public domain model.
+11. every Run owns a distinct workspace root.
+12. Agent file paths are relative and cannot escape through traversal or symlinks.
+13. workspace writes are constrained by file-size and total-quota policy.
+14. published artifacts are checksummed and tied to a Run-owned Workspace.
 
 ## Technology stack
 
@@ -129,6 +141,8 @@ Durable Runtime
 | Skill schema | JSON Schema Draft 2020-12 |
 | Durable runtime | PostgreSQL Run/Step/Checkpoint/Event model |
 | Streaming | SSE |
+| Workspace | Run-scoped persistent filesystem + metadata |
+| Artifact integrity | SHA-256 + MIME/size metadata |
 | Frontend | Vue 3, TypeScript, Element Plus |
 | Quality | pytest, Ruff, mypy, GitHub Actions |
 
@@ -141,8 +155,8 @@ Phase 2  ✅ Authentication + RBAC
 Phase 3  ✅ Agent Harness
 Phase 4  ✅ Tool / Skill Registry
 Phase 5  ✅ Durable Agent Runtime
-Phase 6  ⏭ Workspace + Artifacts
-Phase 7     Docker Sandbox
+Phase 6  ✅ Workspace + Artifacts
+Phase 7  ⏭ Docker Sandbox
 Phase 8     Memory
 Phase 9     Context Engineering
 Phase 10    MCP + Enterprise Data
@@ -169,6 +183,7 @@ Manual end-to-end validation is intentionally deferred until all phases are fini
 - [Phase 3 Agent Harness](docs/09-phase3-agent-harness.md)
 - [Phase 4 Tool / Skill Registry](docs/10-phase4-tool-skill-registry.md)
 - [Phase 5 Durable Agent Runtime](docs/11-phase5-durable-agent-runtime.md)
+- [Phase 6 Workspace + Artifacts](docs/12-phase6-workspace-artifacts.md)
 
 ## License
 
