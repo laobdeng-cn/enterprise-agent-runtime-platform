@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     workspace_quota_bytes: int = 50 * 1024 * 1024
 
     docker_host: str = "tcp://docker:2375"
+    docker_api_version: str = "1.45"
     sandbox_image: str = "enterprise-agent-runtime-sandbox:0.7.0"
     sandbox_build_context: str = "/sandbox-image"
     sandbox_cpu_limit: float = 1.0
