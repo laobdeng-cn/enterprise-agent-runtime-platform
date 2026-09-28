@@ -282,6 +282,90 @@ class WorkspaceStorage:
             "media_type": media_type,
         }
 
+    def prepare_directory(
+        self,
+        storage_key: str,
+        relative_path: str,
+        *,
+        allowed_roots: set[str],
+        mode: int = 0o750,
+    ) -> Path:
+        path = self.resolve(
+            storage_key,
+            relative_path,
+            allowed_roots=allowed_roots,
+            must_exist=False,
+        )
+        if path.exists():
+            raise UnsafeWorkspacePathError(
+                f"Workspace path '{relative_path}' already exists"
+            )
+        path.mkdir(parents=True, mode=mode, exist_ok=False)
+        path.chmod(mode)
+        self._assert_no_symlink_chain(
+            self.initialize(storage_key).resolve(strict=True),
+            path,
+        )
+        return path
+
+    def collect_files(
+        self,
+        storage_key: str,
+        relative_path: str,
+        *,
+        allowed_roots: set[str],
+    ) -> list[Path]:
+        root = self.resolve(
+            storage_key,
+            relative_path,
+            allowed_roots=allowed_roots,
+            must_exist=True,
+        )
+        if not root.is_dir():
+            raise UnsafeWorkspacePathError("Workspace scan target must be a directory")
+
+        files: list[Path] = []
+        for current_root, directories, filenames in os.walk(
+            root,
+            topdown=True,
+            followlinks=False,
+        ):
+            current = Path(current_root)
+            for name in list(directories):
+                child = current / name
+                info = child.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    raise WorkspaceSymlinkError(
+                        f"Symlink directory '{name}' is not allowed"
+                    )
+            for name in filenames:
+                child = current / name
+                info = child.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    raise WorkspaceSymlinkError(
+                        f"Symlink file '{name}' is not allowed"
+                    )
+                if stat.S_ISREG(info.st_mode):
+                    files.append(child)
+        return sorted(files)
+
+    def remove_tree(
+        self,
+        storage_key: str,
+        relative_path: str,
+        *,
+        allowed_roots: set[str],
+    ) -> None:
+        path = self.resolve(
+            storage_key,
+            relative_path,
+            allowed_roots=allowed_roots,
+            must_exist=True,
+        )
+        if not path.is_dir():
+            raise UnsafeWorkspacePathError("Workspace cleanup target must be a directory")
+        shutil.rmtree(path)
+
     def artifact_path(self, storage_key: str, relative_path: str) -> Path:
         path = self.resolve(
             storage_key,
