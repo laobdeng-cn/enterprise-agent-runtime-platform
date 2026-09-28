@@ -9,6 +9,7 @@ from app.clients.redis import redis_client
 from app.core.config import settings
 from app.db.session import async_session_maker, engine
 from app.services.runtime import recover_incomplete_runs
+from app.services.sandbox import sandbox_manager
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             )
 
     yield
+    await sandbox_manager.close()
     await redis_client.aclose()
     await engine.dispose()
 
