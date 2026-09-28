@@ -82,27 +82,31 @@ async def seed() -> None:
                 session.add(permission)
                 permissions[code] = permission
 
-        await session.flush()
-
         role_result = await session.execute(
             select(Role).options(selectinload(Role.permissions))
         )
         roles = {item.name: item for item in role_result.scalars().unique().all()}
 
         for role_name, (description, permission_codes) in ROLE_DEFINITIONS.items():
-            role = roles.get(role_name)
-            if role is None:
-                role = Role(name=role_name, description=description)
-                session.add(role)
-                roles[role_name] = role
-                await session.flush()
-            else:
-                role.description = description
-
-            role.permissions = [
+            assigned_permissions = [
                 permissions[code]
                 for code in sorted(permission_codes)
             ]
+            role = roles.get(role_name)
+
+            if role is None:
+                role = Role(
+                    name=role_name,
+                    description=description,
+                    permissions=assigned_permissions,
+                )
+                session.add(role)
+                roles[role_name] = role
+            else:
+                role.description = description
+                role.permissions = assigned_permissions
+
+        await session.flush()
 
         username = settings.bootstrap_admin_username.strip()
         password = settings.bootstrap_admin_password
