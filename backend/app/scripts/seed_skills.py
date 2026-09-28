@@ -206,7 +206,6 @@ SAFE_SKILLS: dict[str, dict[str, Any]] = {
         "side_effect": "REVERSIBLE_WRITE",
         "provider_config": {"action": "publish_artifact"},
     },
-,
     "python_execute": {
         "description": (
             "Execute Python 3.12 inside the current Run's isolated Docker sandbox. "
@@ -298,6 +297,8 @@ SAFE_SKILLS: dict[str, dict[str, Any]] = {
         "max_attempts": 1,
         "provider_config": {"action": "python_execute"},
     },
+}
+
 
 async def seed() -> None:
     async with async_session_maker() as session:
