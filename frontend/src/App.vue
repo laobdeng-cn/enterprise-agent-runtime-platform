@@ -35,6 +35,7 @@ interface AgentVersion {
   temperature: number | null;
   max_tokens: number | null;
   context_policy: Record<string, unknown>;
+  skills: string[];
 }
 
 interface Agent {
@@ -44,6 +45,25 @@ interface Agent {
   status: string;
   active_version_id: string | null;
   versions: AgentVersion[];
+}
+
+interface SkillVersion {
+  id: string;
+  version: number;
+  required_permissions: string[];
+  side_effect: string;
+  timeout_seconds: number;
+  max_attempts: number;
+}
+
+interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  provider_type: string;
+  status: string;
+  active_version_id: string | null;
+  versions: SkillVersion[];
 }
 
 interface AgentInvokeResponse {
@@ -60,12 +80,13 @@ interface AgentInvokeResponse {
     total_tokens: number;
   };
   duration_ms: number;
+  tool_results: Array<Record<string, unknown>>;
 }
 
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
-const version = ref("0.3.0");
+const version = ref("0.4.0");
 
 const username = ref("");
 const password = ref("");
@@ -76,9 +97,12 @@ const currentUser = ref<CurrentUser | null>(null);
 
 const agents = ref<Agent[]>([]);
 const agentsLoading = ref(false);
+const skills = ref<Skill[]>([]);
+const skillsLoading = ref(false);
 const agentError = ref("");
 const newAgentName = ref("");
 const newAgentInstructions = ref("You are a concise enterprise assistant.");
+const selectedNewAgentSkills = ref<string[]>([]);
 const selectedAgentId = ref("");
 const previewInput = ref("");
 const previewLoading = ref(false);
@@ -96,6 +120,9 @@ const canReadAgents = computed(
 );
 const canCreateAgents = computed(
   () => currentUser.value?.permissions.includes("agent:create") ?? false,
+);
+const canReadSkills = computed(
+  () => currentUser.value?.permissions.includes("skill:read") ?? false,
 );
 const canRunAgents = computed(
   () =>
@@ -170,6 +197,22 @@ async function loadAgents(): Promise<void> {
   }
 }
 
+async function loadSkills(): Promise<void> {
+  if (!currentUser.value || !canReadSkills.value) {
+    skills.value = [];
+    return;
+  }
+
+  skillsLoading.value = true;
+  try {
+    const response = await apiFetch("/api/skills");
+    if (!response.ok) return;
+    skills.value = (await response.json()) as Skill[];
+  } finally {
+    skillsLoading.value = false;
+  }
+}
+
 async function login(): Promise<void> {
   authError.value = "";
   authLoading.value = true;
@@ -194,7 +237,7 @@ async function login(): Promise<void> {
     sessionStorage.setItem("earp_access_token", payload.access_token);
     password.value = "";
     await loadCurrentUser();
-    await loadAgents();
+    await Promise.all([loadAgents(), loadSkills()]);
   } catch {
     authError.value = "Authentication service is unavailable.";
   } finally {
@@ -212,11 +255,12 @@ async function createAgent(): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: newAgentName.value.trim(),
-        description: "Created from the Phase 3 console.",
+        description: "Created from the Phase 4 console.",
         system_instructions: newAgentInstructions.value,
         model_provider: "deepseek",
         model_name: "deepseek-chat",
         temperature: 0.2,
+        skills: selectedNewAgentSkills.value,
       }),
     });
 
@@ -227,6 +271,7 @@ async function createAgent(): Promise<void> {
 
     const created = (await response.json()) as Agent;
     newAgentName.value = "";
+    selectedNewAgentSkills.value = [];
     selectedAgentId.value = created.id;
     await loadAgents();
   } catch {
@@ -271,7 +316,9 @@ function logout(): void {
   token.value = "";
   currentUser.value = null;
   agents.value = [];
+  skills.value = [];
   selectedAgentId.value = "";
+  selectedNewAgentSkills.value = [];
   previewResult.value = null;
   sessionStorage.removeItem("earp_access_token");
 }
@@ -279,7 +326,7 @@ function logout(): void {
 onMounted(async () => {
   await refreshHealth();
   await loadCurrentUser();
-  await loadAgents();
+  await Promise.all([loadAgents(), loadSkills()]);
 });
 </script>
 
@@ -288,15 +335,15 @@ onMounted(async () => {
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Agent Harness</h1>
+        <h1>Tool / Skill Registry</h1>
         <p class="subtitle">
-          Phase 3 adds versioned Agent definitions, normalized model contracts,
-          lifecycle hooks, and a DeepSeek provider behind a stable Harness boundary.
+          Phase 4 adds versioned Skills, JSON Schema validation, RBAC-aware execution,
+          bounded timeout/retry handling, and dynamic Skill binding for Agent versions.
         </p>
       </div>
 
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 3 · v{{ version }}
+        Phase 4 · v{{ version }}
       </el-tag>
     </section>
 
@@ -397,15 +444,15 @@ onMounted(async () => {
       </el-card>
 
       <el-card shadow="never">
-        <template #header><strong>Harness boundary</strong></template>
+        <template #header><strong>Controlled execution boundary</strong></template>
         <div class="flow">
-          <span>AgentVersion</span><span>→</span><span>Context Package</span>
-          <span>→</span><span>ModelRequest</span><span>→</span>
-          <span>Provider Registry</span><span>→</span><span>DeepSeek</span>
+          <span>LLM Tool Call</span><span>→</span><span>Bound SkillVersion</span>
+          <span>→</span><span>JSON Schema</span><span>→</span>
+          <span>RBAC</span><span>→</span><span>Timeout / Retry</span>
         </div>
         <p class="muted">
-          API handlers call application services and the Harness. They do not call
-          the model provider directly.
+          Tool arguments are untrusted model output. They are validated and authorized
+          before any provider adapter executes them.
         </p>
       </el-card>
     </section>
@@ -424,6 +471,21 @@ onMounted(async () => {
               :rows="5"
             />
           </el-form-item>
+          <el-form-item v-if="canReadSkills" label="Bound Skills">
+            <el-select
+              v-model="selectedNewAgentSkills"
+              multiple
+              clearable
+              placeholder="Select only the capabilities this Agent may use"
+            >
+              <el-option
+                v-for="skill in skills"
+                :key="skill.id"
+                :label="skill.name"
+                :value="skill.name"
+              />
+            </el-select>
+          </el-form-item>
           <el-button
             type="primary"
             :disabled="!newAgentName.trim() || !newAgentInstructions.trim()"
@@ -437,7 +499,7 @@ onMounted(async () => {
       <el-card shadow="never">
         <template #header>
           <div class="card-header">
-            <strong>Harness preview</strong>
+            <strong>Harness + Skills preview</strong>
             <el-button text :loading="agentsLoading" @click="loadAgents">Reload</el-button>
           </div>
         </template>
@@ -481,8 +543,36 @@ onMounted(async () => {
             <el-tag type="info">{{ previewResult.model }}</el-tag>
             <span>{{ previewResult.usage.total_tokens }} tokens</span>
             <span>{{ previewResult.duration_ms.toFixed(1) }} ms</span>
+            <span>{{ previewResult.tool_results.length }} tool result(s)</span>
           </div>
           <pre>{{ previewResult.content }}</pre>
+        </div>
+      </el-card>
+
+      <el-card v-if="canReadSkills" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <strong>Skill Registry</strong>
+            <el-button text :loading="skillsLoading" @click="loadSkills">Reload</el-button>
+          </div>
+        </template>
+        <div class="principal-grid">
+          <div v-for="skill in skills" :key="skill.id">
+            <dt>{{ skill.name }}</dt>
+            <dd>
+              <div class="tag-list">
+                <el-tag>{{ skill.provider_type }}</el-tag>
+                <el-tag type="info">{{ skill.status }}</el-tag>
+                <el-tag
+                  v-if="skill.versions.length"
+                  type="success"
+                >
+                  v{{ skill.versions[skill.versions.length - 1].version }}
+                </el-tag>
+              </div>
+              <p class="muted">{{ skill.description }}</p>
+            </dd>
+          </div>
         </div>
       </el-card>
     </section>
