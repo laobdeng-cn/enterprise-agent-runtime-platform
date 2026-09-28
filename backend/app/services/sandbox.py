@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
 from app.db.session import async_session_maker
-from app.models.runtime import AgentRun, RunEvent, RunStep
+from app.models.runtime import RunEvent, RunStep
 from app.sandbox.contracts import (
     SandboxArtifactResponse,
     SandboxExecutionResponse,
@@ -19,10 +19,7 @@ from app.sandbox.contracts import (
     SandboxStatus,
 )
 from app.sandbox.docker_runtime import DockerSandboxManager
-from app.sandbox.errors import (
-    SandboxError,
-    SandboxOutputPolicyError,
-)
+from app.sandbox.errors import SandboxOutputPolicyError
 from app.services.runtime import get_run
 from app.services.workspaces import (
     get_workspace,
