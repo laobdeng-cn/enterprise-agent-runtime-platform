@@ -2,91 +2,79 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-1%20engineering%20skeleton-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-2%20authentication%20%26%20RBAC-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
 [![FastAPI](https://img.shields.io/badge/FastAPI-active-success)](#technology-stack)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-informational)](#technology-stack)
 [![Vue](https://img.shields.io/badge/Vue-3-success)](#technology-stack)
-[![LangGraph](https://img.shields.io/badge/LangGraph-phase%203+-informational)](#development-roadmap)
-[![MCP](https://img.shields.io/badge/MCP-phase%2010+-informational)](#development-roadmap)
 
 ## Overview
 
-Enterprise Agent Runtime Platform is designed to move beyond a simple LLM chat application. The target platform provides a controlled execution environment in which an agent can:
+Enterprise Agent Runtime Platform is designed to move beyond a simple LLM chat application. The target platform provides a controlled execution environment in which an Agent can plan work, call governed capabilities, operate in isolated workspaces, pause for approval, recover from checkpoints, and expose complete traces and evaluations.
 
-- plan and execute multi-step business tasks;
-- discover and call tools / skills with schema validation;
-- connect to enterprise data and services through MCP, APIs, databases, and knowledge bases;
-- manage conversation, task, and long-term memory;
-- build context under explicit token budgets;
-- execute code inside an isolated sandbox and per-run workspace;
-- pause for human approval before sensitive actions;
-- resume from durable checkpoints;
-- coordinate multiple specialized agents;
-- expose full execution traces, metrics, and regression evaluation.
+**Phase 2 is implemented.** The platform now has a durable identity and RBAC foundation before Agent execution is introduced.
 
-The project is built incrementally. **Phase 1 is now implemented**: the backend, frontend, PostgreSQL, Redis, migrations, tests, Docker Compose, and CI skeleton are in place. Agent behavior begins in later phases.
+## Core Security Principle
 
-## Core Design Principle
-
-The LLM may **reason and propose actions**, but the runtime owns **execution, authorization, isolation, state, and auditability**.
+The LLM may reason and propose actions, but it never authenticates a user or grants authorization.
 
 ```text
-User Goal
-   |
-   v
-Agent Harness
-   |
-   +--> Context Builder
-   +--> Memory Manager
-   +--> Policy Engine
-   +--> Tool / Skill Binding
-   |
-   v
-Agent Runtime / Workflow
-   |
-   +--> MCP / REST / DB / Knowledge
-   +--> Workspace / Sandbox
-   +--> Human Approval
-   |
-   v
-Trace + Checkpoint + Evaluation
+User Credentials
+      |
+      v
+Argon2 Verification
+      |
+      v
+JWT Access Token
+      |
+      v
+Current Principal
+      |
+      v
+RBAC
+      |
+      v
+Protected Platform Capability
 ```
 
-## Current Phase — Engineering Skeleton
+Later phases add Tool/Skill policy and human approval on top of this first authorization gate.
 
-The repository currently provides:
+## Current Runtime Topology
 
 ```text
-Browser
-  |
-  v
-Vue 3 + TypeScript :5173
-  |
-  | /health proxy
-  v
+Browser :5173
+   |
+   | /api + /health
+   v
 FastAPI :8000
-  |
-  +----> PostgreSQL 16 :5432
-  |
-  +----> Redis 7 :6379
+   |
+   +--> PostgreSQL 16
+   |      |
+   |      +--> users
+   |      +--> roles
+   |      +--> permissions
+   |      +--> user_roles
+   |      +--> role_permissions
+   |
+   +--> Redis 7
 ```
 
-Implemented foundations:
+## Phase 2 Features
 
-- Python 3.12 + FastAPI;
-- Pydantic Settings;
-- SQLAlchemy 2 + psycopg;
-- Alembic baseline migration;
-- PostgreSQL 16;
-- Redis 7;
-- Vue 3 + TypeScript + Vite + Element Plus;
-- Docker Compose;
-- dependency-aware health checks;
-- pytest;
-- Ruff;
-- mypy;
-- GitHub Actions CI.
+- User, Role and Permission persistence
+- many-to-many User ↔ Role
+- many-to-many Role ↔ Permission
+- Argon2 password hashing
+- JWT access-token issuance and validation
+- database-backed current-principal resolution
+- reusable `require_permissions(...)` dependency
+- HTTP 401 vs 403 separation
+- idempotent default RBAC seed
+- optional bootstrap admin
+- admin-only RBAC inspection APIs
+- frontend sign-in/current-principal view
+- CI authentication + authorization smoke test
 
 ## Quick Start
 
@@ -95,16 +83,28 @@ Requirements:
 - Docker Desktop / Docker Engine
 - Docker Compose v2
 
-Start the complete Phase 1 stack:
+Clone and configure:
 
 ```bash
 git clone https://github.com/laobdeng-cn/enterprise-agent-runtime-platform.git
 cd enterprise-agent-runtime-platform
 cp .env.example .env
-docker compose up --build
 ```
 
-The `.env` copy is optional for the default development setup.
+Before first startup, set at least a local JWT secret and optional bootstrap administrator in `.env`:
+
+```text
+JWT_SECRET_KEY=replace-with-a-long-random-development-secret
+BOOTSTRAP_ADMIN_USERNAME=admin
+BOOTSTRAP_ADMIN_PASSWORD=choose-a-local-password
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+```
+
+Start:
+
+```bash
+docker compose up --build
+```
 
 Open:
 
@@ -115,153 +115,80 @@ Open:
 | Health | http://localhost:8000/health |
 | Liveness | http://localhost:8000/health/live |
 
-Check containers:
+## Authentication API
 
-```bash
-docker compose ps
-```
+Login:
 
-A healthy Phase 1 environment should show PostgreSQL, Redis, backend, and frontend as healthy/running.
+```http
+POST /api/auth/login
+Content-Type: application/json
 
-Stop:
-
-```bash
-docker compose down
-```
-
-Remove development volumes as well:
-
-```bash
-docker compose down -v
-```
-
-## Health Contract
-
-`GET /health` verifies PostgreSQL and Redis instead of merely reporting that the HTTP process is alive.
-
-Expected healthy response:
-
-```json
 {
-  "status": "ok",
-  "service": "enterprise-agent-runtime-platform",
-  "version": "0.1.0",
-  "database": "ok",
-  "redis": "ok"
+  "username": "admin",
+  "password": "..."
 }
 ```
 
-`GET /health/live` is a lightweight liveness endpoint independent of downstream dependency status.
+Current principal:
 
-## Repository Layout
-
-```text
-enterprise-agent-runtime-platform/
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── backend/
-│   ├── alembic/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── clients/
-│   │   ├── core/
-│   │   ├── db/
-│   │   ├── models/
-│   │   ├── schemas/
-│   │   ├── services/
-│   │   ├── agents/
-│   │   ├── runtime/
-│   │   ├── skills/
-│   │   ├── memory/
-│   │   ├── mcp/
-│   │   ├── sandbox/
-│   │   ├── workflows/
-│   │   ├── observability/
-│   │   └── eval/
-│   ├── tests/
-│   ├── Dockerfile
-│   └── pyproject.toml
-├── frontend/
-│   ├── src/
-│   ├── Dockerfile
-│   └── package.json
-├── mcp_servers/
-├── sandbox/
-├── docs/
-├── docker-compose.yml
-├── Makefile
-└── .env.example
+```http
+GET /api/auth/me
+Authorization: Bearer <access-token>
 ```
+
+Admin RBAC inspection:
+
+```http
+GET /api/rbac/roles
+GET /api/rbac/permissions
+Authorization: Bearer <admin-token>
+```
+
+## Default Roles
+
+| Role | Purpose |
+| --- | --- |
+| `admin` | Platform administration and all current permissions |
+| `agent_developer` | Agent/Skill/Run development and evaluation |
+| `business_user` | Runs approved Agents and consumes outputs |
+| `approver` | Reviews policy-gated actions |
+
+Roles are permission bundles; application code checks atomic permissions rather than branching on role names.
 
 ## Technology Stack
 
 | Layer | Choice |
 | --- | --- |
 | Backend | Python 3.12, FastAPI, Pydantic v2 |
+| Authentication | Argon2 via pwdlib, JWT via PyJWT |
 | Persistence | SQLAlchemy 2, Alembic, psycopg |
 | Primary database | PostgreSQL 16 |
 | Runtime state / cache | Redis 7 |
 | Frontend | Vue 3, TypeScript, Vite, Element Plus |
 | Infrastructure | Docker Compose |
-| Backend quality | pytest, Ruff, mypy |
-| CI | GitHub Actions |
+| Quality | pytest, Ruff, mypy, GitHub Actions |
 | Agent orchestration | LangGraph — Phase 3+ |
 | LLM | DeepSeek through internal provider abstraction — Phase 3+ |
 | Protocol | MCP — Phase 10+ |
 | Sandbox | Docker-isolated Python execution — Phase 7+ |
-| Vector retrieval | pgvector planned for memory/retrieval phases |
-
-## Target Capabilities
-
-| Capability | Goal |
-| --- | --- |
-| Agent Harness | Unified model/tool/context lifecycle and runtime hooks |
-| Tool / Skill Registry | Versioned registration, discovery, binding, validation, retry and timeout |
-| Agent Runtime | Long-running runs, steps, pause/resume/cancel/retry and checkpoints |
-| Workspace | Per-run files and generated artifacts with path isolation |
-| Sandbox | Resource-limited isolated code execution |
-| Memory | Conversation, task, long-term and semantic memory |
-| Context Engineering | Budgeted assembly of instructions, state, memory, evidence and tools |
-| MCP | Standardized enterprise tool/data connectivity |
-| RBAC & Policy | Deterministic authorization outside the LLM |
-| Multi-Agent Workflow | DAG-based coordination with explicit responsibilities |
-| Human-in-the-loop | Approval gates for risky actions |
-| Observability | Trace timeline for prompts, tool calls, latency, tokens and errors |
-| Evaluation | Task, tool, workflow, policy, latency and cost regression metrics |
-
-## Domain Vocabulary
-
-- **Agent** — a versioned definition describing model policy, instructions and capabilities.
-- **Skill** — a callable capability with a machine-readable contract and authorization requirements.
-- **Run** — one durable execution instance of an Agent or Workflow.
-- **RunStep** — one durable step inside a Run.
-- **ToolCall** — one concrete request to invoke a Skill.
-- **Workspace** — isolated file scope owned by a Run.
-- **Artifact** — an output generated by a Run.
-- **Memory** — durable or retrievable state available to future context.
-- **Workflow** — an explicit graph of tasks, dependencies and routing rules.
-- **Approval** — a human decision required before a protected action.
-- **TraceSpan** — one observable unit of execution.
-- **EvaluationRun** — evaluation/regression execution over defined cases.
 
 ## Safety and Governance Invariants
 
 1. **The LLM never grants permissions.**
-2. **Tool input is validated before execution.**
-3. **Sensitive actions may require human approval.**
-4. **Sandbox execution has explicit resource and filesystem boundaries.**
-5. **A Run only accesses authorized resources and its assigned Workspace.**
-6. **Externally meaningful actions are traceable.**
-7. **Retries are bounded and side effects require idempotency consideration.**
-8. **Run state transitions are explicit and durable.**
+2. **Passwords are stored only as one-way Argon2 hashes.**
+3. **JWT identity is re-resolved against the database on protected requests.**
+4. **Inactive or missing users cannot operate with a stale token.**
+5. **Tool input will be validated before execution.**
+6. **Sensitive actions may require human approval.**
+7. **A Run only accesses authorized resources and its assigned Workspace.**
+8. **Externally meaningful actions are traceable.**
 
 ## Development Roadmap
 
 ```text
 Phase 0  ✅ Product scope, architecture, contracts, ADRs
 Phase 1  ✅ Engineering skeleton + local infrastructure
-Phase 2  Authentication + RBAC
+Phase 2  ✅ Authentication + RBAC
 Phase 3  Agent Harness
 Phase 4  Tool / Skill Registry
 Phase 5  Agent Runtime + durable Run lifecycle
@@ -277,18 +204,17 @@ Phase 14 Agent Evaluation + Regression
 Phase 15 Enterprise demonstration scenario + deployment hardening
 ```
 
-See [docs/06-phase-roadmap.md](docs/06-phase-roadmap.md) for acceptance criteria and [docs/07-phase1-engineering-skeleton.md](docs/07-phase1-engineering-skeleton.md) for Phase 1 details.
-
 ## Documentation
 
-1. [Product Scope](docs/00-product-scope.md)
-2. [System Architecture](docs/01-system-architecture.md)
-3. [Domain Model](docs/02-domain-model.md)
-4. [Agent Run Lifecycle](docs/03-agent-run-lifecycle.md)
-5. [Tool / Skill Model](docs/04-tool-skill-model.md)
-6. [RBAC & Security Model](docs/05-rbac-security-model.md)
-7. [Development Roadmap](docs/06-phase-roadmap.md)
-8. [Phase 1 Engineering Skeleton](docs/07-phase1-engineering-skeleton.md)
+- [Product Scope](docs/00-product-scope.md)
+- [System Architecture](docs/01-system-architecture.md)
+- [Domain Model](docs/02-domain-model.md)
+- [Agent Run Lifecycle](docs/03-agent-run-lifecycle.md)
+- [Tool / Skill Model](docs/04-tool-skill-model.md)
+- [RBAC & Security Model](docs/05-rbac-security-model.md)
+- [Development Roadmap](docs/06-phase-roadmap.md)
+- [Phase 1 Engineering Skeleton](docs/07-phase1-engineering-skeleton.md)
+- [Phase 2 Authentication & RBAC](docs/08-phase2-auth-rbac.md)
 
 Architecture decisions are maintained under [docs/adr](docs/adr).
 

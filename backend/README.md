@@ -2,19 +2,21 @@
 
 FastAPI control plane and runtime backend for Enterprise Agent Runtime Platform.
 
-## Phase 1 contents
+## Current Phase 2 contents
 
-- Python 3.12 project metadata
-- FastAPI application
-- dependency-aware `/health`
-- independent `/health/live`
+- Python 3.12 / FastAPI
 - Pydantic Settings
-- async SQLAlchemy engine
-- PostgreSQL connectivity
+- async SQLAlchemy / PostgreSQL
 - Redis connectivity
-- Alembic baseline
-- pytest baseline
-- Ruff and mypy configuration
+- Alembic migrations
+- User / Role / Permission persistence
+- Argon2 password hashing
+- JWT access tokens
+- current-principal dependency
+- reusable RBAC permission dependency
+- canonical role/permission seed
+- optional bootstrap admin
+- pytest, Ruff, and mypy
 
 ## Local development
 
@@ -25,16 +27,43 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 alembic upgrade head
+python -m app.scripts.seed_rbac
 uvicorn app.main:app --reload
 ```
 
-On Windows PowerShell, activate with:
+On Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-The default local configuration expects PostgreSQL on `localhost:5432` and Redis on `localhost:6379`. The recommended project workflow is Docker Compose from the repository root.
+The recommended project workflow remains Docker Compose from the repository root.
+
+## Authentication endpoints
+
+```text
+POST /api/auth/login
+GET  /api/auth/me
+```
+
+Admin-only RBAC inspection:
+
+```text
+GET /api/rbac/roles
+GET /api/rbac/permissions
+```
+
+## Bootstrap admin
+
+Set these before running the seed command:
+
+```text
+BOOTSTRAP_ADMIN_USERNAME
+BOOTSTRAP_ADMIN_PASSWORD
+BOOTSTRAP_ADMIN_EMAIL   # optional
+```
+
+The user is created only when both username and password are present.
 
 ## Tests and lint
 
@@ -46,4 +75,4 @@ mypy app
 
 ## Boundary rule
 
-HTTP handlers must not contain Agent orchestration logic. API code delegates to application/runtime services. Model providers are accessed through an internal adapter introduced in Phase 3.
+HTTP handlers do not contain Agent orchestration logic. The authenticated current principal and RBAC dependency added in Phase 2 are shared security infrastructure for later Agent, Skill, Run, Workspace and MCP modules.

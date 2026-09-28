@@ -2,16 +2,19 @@
 
 Vue 3 + TypeScript operations console for Enterprise Agent Runtime Platform.
 
-## Phase 1 contents
+## Current Phase 2 contents
 
 - Vue 3
 - TypeScript
 - Vite
 - Element Plus
-- responsive engineering-status page
-- backend health proxy
+- dependency health status
+- JWT sign-in form
+- current principal viewer
+- role and permission display
+- backend proxy for `/health` and `/api`
 
-The Phase 1 page calls `/health` through Vite and displays Backend, PostgreSQL and Redis status.
+The browser stores the current access token in `sessionStorage`, not persistent local storage. This is sufficient for the development console; production session hardening is deferred until deployment/security hardening phases.
 
 ## Local development
 
@@ -35,4 +38,4 @@ npm run build
 npm run typecheck
 ```
 
-Later phases will evolve this skeleton into Agent Management, Skill Registry, Run Trace, Workspace, Approval and Evaluation consoles.
+Later phases will evolve this console into Agent Management, Skill Registry, Run Trace, Workspace, Approval and Evaluation views.

@@ -11,10 +11,32 @@ interface HealthResponse {
   redis: "ok" | "unavailable";
 }
 
+interface LoginResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+}
+
+interface CurrentUser {
+  id: string;
+  username: string;
+  email: string | null;
+  is_active: boolean;
+  roles: string[];
+  permissions: string[];
+}
+
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
-const version = ref("0.1.0");
+const version = ref("0.2.0");
+
+const username = ref("");
+const password = ref("");
+const authError = ref("");
+const authLoading = ref(false);
+const token = ref(sessionStorage.getItem("earp_access_token") ?? "");
+const currentUser = ref<CurrentUser | null>(null);
 
 const overallType = computed(() => {
   if (backend.value === "checking") return "info";
@@ -43,7 +65,69 @@ async function refreshHealth(): Promise<void> {
   }
 }
 
-onMounted(refreshHealth);
+async function loadCurrentUser(): Promise<void> {
+  if (!token.value) {
+    currentUser.value = null;
+    return;
+  }
+
+  const response = await fetch("/api/auth/me", {
+    headers: {
+      Authorization: `Bearer ${token.value}`,
+    },
+  });
+
+  if (!response.ok) {
+    logout();
+    return;
+  }
+
+  currentUser.value = (await response.json()) as CurrentUser;
+}
+
+async function login(): Promise<void> {
+  authError.value = "";
+  authLoading.value = true;
+
+  try {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: username.value,
+        password: password.value,
+      }),
+    });
+
+    if (!response.ok) {
+      authError.value = "Invalid username or password.";
+      return;
+    }
+
+    const payload = (await response.json()) as LoginResponse;
+    token.value = payload.access_token;
+    sessionStorage.setItem("earp_access_token", payload.access_token);
+    password.value = "";
+    await loadCurrentUser();
+  } catch {
+    authError.value = "Authentication service is unavailable.";
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+function logout(): void {
+  token.value = "";
+  currentUser.value = null;
+  sessionStorage.removeItem("earp_access_token");
+}
+
+onMounted(async () => {
+  await refreshHealth();
+  await loadCurrentUser();
+});
 </script>
 
 <template>
@@ -51,15 +135,15 @@ onMounted(refreshHealth);
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Engineering Skeleton</h1>
+        <h1>Authentication & RBAC</h1>
         <p class="subtitle">
-          Phase 1 establishes the control-plane foundation before Agent Harness,
-          Skills, durable Runs, Sandbox, MCP, and evaluation are introduced.
+          Phase 2 establishes authenticated principals, version-independent roles,
+          atomic permissions, and deterministic authorization outside the LLM.
         </p>
       </div>
 
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 1 · v{{ version }}
+        Phase 2 · v{{ version }}
       </el-tag>
     </section>
 
@@ -105,18 +189,114 @@ onMounted(refreshHealth);
       </div>
     </el-card>
 
-    <section class="foundation-grid">
-      <el-card shadow="hover">
-        <h2>Control Plane</h2>
-        <p>FastAPI, Pydantic Settings, SQLAlchemy, Alembic, and health contracts.</p>
+    <section class="auth-grid">
+      <el-card v-if="!currentUser" shadow="never">
+        <template #header>
+          <strong>Sign in</strong>
+        </template>
+
+        <el-form label-position="top" @submit.prevent="login">
+          <el-form-item label="Username">
+            <el-input
+              v-model="username"
+              autocomplete="username"
+              placeholder="Bootstrap or provisioned user"
+            />
+          </el-form-item>
+
+          <el-form-item label="Password">
+            <el-input
+              v-model="password"
+              type="password"
+              show-password
+              autocomplete="current-password"
+              @keyup.enter="login"
+            />
+          </el-form-item>
+
+          <el-alert
+            v-if="authError"
+            :title="authError"
+            type="error"
+            show-icon
+            :closable="false"
+            class="auth-alert"
+          />
+
+          <el-button
+            type="primary"
+            :loading="authLoading"
+            :disabled="!username || !password"
+            @click="login"
+          >
+            Authenticate
+          </el-button>
+        </el-form>
       </el-card>
-      <el-card shadow="hover">
-        <h2>Infrastructure</h2>
-        <p>PostgreSQL 16, Redis, Docker Compose, explicit dependency health checks.</p>
+
+      <el-card v-else shadow="never">
+        <template #header>
+          <div class="card-header">
+            <strong>Current principal</strong>
+            <el-button text type="danger" @click="logout">Sign out</el-button>
+          </div>
+        </template>
+
+        <dl class="principal-grid">
+          <div>
+            <dt>Username</dt>
+            <dd>{{ currentUser.username }}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>
+              <el-tag :type="currentUser.is_active ? 'success' : 'danger'">
+                {{ currentUser.is_active ? "active" : "inactive" }}
+              </el-tag>
+            </dd>
+          </div>
+          <div>
+            <dt>Roles</dt>
+            <dd class="tag-list">
+              <el-tag v-for="role in currentUser.roles" :key="role">
+                {{ role }}
+              </el-tag>
+            </dd>
+          </div>
+          <div>
+            <dt>Permissions</dt>
+            <dd class="tag-list">
+              <el-tag
+                v-for="permission in currentUser.permissions"
+                :key="permission"
+                type="info"
+              >
+                {{ permission }}
+              </el-tag>
+            </dd>
+          </div>
+        </dl>
       </el-card>
-      <el-card shadow="hover">
-        <h2>Next Boundary</h2>
-        <p>Phase 2 adds identity, JWT authentication, roles, permissions, and RBAC.</p>
+
+      <el-card shadow="never">
+        <template #header>
+          <strong>Authorization boundary</strong>
+        </template>
+        <div class="flow">
+          <span>Authenticated User</span>
+          <span>→</span>
+          <span>JWT</span>
+          <span>→</span>
+          <span>Current Principal</span>
+          <span>→</span>
+          <span>RBAC</span>
+          <span>→</span>
+          <span>Protected API</span>
+        </div>
+        <p class="muted">
+          The model never grants permissions. Later Tool, Skill, MCP, Workspace,
+          and Approval layers reuse this same principal and permission model.
+        </p>
       </el-card>
     </section>
   </main>

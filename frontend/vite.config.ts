@@ -3,6 +3,7 @@ import vue from "@vitejs/plugin-vue";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  const backendTarget = env.VITE_BACKEND_PROXY_TARGET || "http://localhost:8000";
 
   return {
     plugins: [vue()],
@@ -11,7 +12,11 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         "/health": {
-          target: env.VITE_BACKEND_PROXY_TARGET || "http://localhost:8000",
+          target: backendTarget,
+          changeOrigin: true,
+        },
+        "/api": {
+          target: backendTarget,
           changeOrigin: true,
         },
       },
