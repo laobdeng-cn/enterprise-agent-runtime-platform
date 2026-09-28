@@ -31,32 +31,34 @@ class AgentHasNoActiveVersionError(ValueError):
     pass
 
 
-def _agent_load_options() -> tuple[object, object]:
-    versions = (
-        selectinload(Agent.versions)
-        .selectinload(AgentVersion.bound_skill_versions)
-        .selectinload(SkillVersion.skill)
-    )
-    active = (
-        selectinload(Agent.active_version)
-        .selectinload(AgentVersion.bound_skill_versions)
-        .selectinload(SkillVersion.skill)
-    )
-    return versions, active
-
-
 async def list_agents(session: AsyncSession) -> list[Agent]:
-    versions, active = _agent_load_options()
-    statement = select(Agent).options(versions, active).order_by(Agent.name)
+    statement = (
+        select(Agent)
+        .options(
+            selectinload(Agent.versions)
+            .selectinload(AgentVersion.bound_skill_versions)
+            .selectinload(SkillVersion.skill),
+            selectinload(Agent.active_version)
+            .selectinload(AgentVersion.bound_skill_versions)
+            .selectinload(SkillVersion.skill),
+        )
+        .order_by(Agent.name)
+    )
     result = await session.execute(statement)
     return list(result.scalars().unique().all())
 
 
 async def get_agent(session: AsyncSession, agent_id: UUID) -> Agent:
-    versions, active = _agent_load_options()
     statement = (
         select(Agent)
-        .options(versions, active)
+        .options(
+            selectinload(Agent.versions)
+            .selectinload(AgentVersion.bound_skill_versions)
+            .selectinload(SkillVersion.skill),
+            selectinload(Agent.active_version)
+            .selectinload(AgentVersion.bound_skill_versions)
+            .selectinload(SkillVersion.skill),
+        )
         .where(Agent.id == agent_id)
         .execution_options(populate_existing=True)
     )

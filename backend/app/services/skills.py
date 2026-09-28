@@ -203,11 +203,15 @@ async def resolve_active_skill_versions(
             "Unknown, disabled, or unversioned Skills: " + ", ".join(missing)
         )
 
-    return [
-        skills[name].active_version
-        for name in ordered_names
-        if skills[name].active_version is not None
-    ]
+    resolved: list[SkillVersion] = []
+    for name in ordered_names:
+        active_version = skills[name].active_version
+        if active_version is None:
+            raise SkillBindingError(
+                f"Skill '{name}' has no active version"
+            )
+        resolved.append(active_version)
+    return resolved
 
 
 async def execute_active_skill(

@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from app.models.skill import SkillVersion
@@ -9,8 +9,8 @@ LocalSkillHandler = Callable[[dict[str, Any]], Awaitable[Any]]
 
 
 class LocalSkillAdapter(SkillProviderAdapter):
-    def __init__(self, handlers: dict[str, LocalSkillHandler]) -> None:
-        self.handlers = handlers
+    def __init__(self, handlers: Mapping[str, LocalSkillHandler]) -> None:
+        self.handlers = dict(handlers)
 
     async def execute(
         self,
