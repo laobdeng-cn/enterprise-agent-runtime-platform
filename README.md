@@ -2,7 +2,7 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-6%20Workspace%20%2B%20Artifacts-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-7%20Docker%20Sandbox-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-provider-informational)](#technology-stack)
@@ -11,7 +11,7 @@
 
 Enterprise Agent Runtime Platform is a governed execution platform rather than a thin LLM chat wrapper.
 
-**Phase 6 is implemented.** Every durable Run now owns an isolated persistent Workspace with safe path resolution, file policies, Run-scoped file Skills, Artifact metadata, checksums and authorized downloads.
+**Phase 7 is implemented.** Durable Runs can now execute Python through a default-deny Docker Sandbox with CPU/memory/PID/time limits, no network, read-only Run mounts, persisted SANDBOX_EXECUTION steps, and validated Artifact promotion.
 
 ## Current architecture
 
@@ -35,6 +35,11 @@ Authenticated Principal
         |
         v
  Durable Runtime
+        |
+        +--> Docker Sandbox
+              ├── input/    read-only
+              ├── working/  read-only
+              └── output/   isolated write
         |
         v
    Agent Harness
@@ -128,6 +133,10 @@ Workspace
 12. Agent file paths are relative and cannot escape through traversal or symlinks.
 13. workspace writes are constrained by file-size and total-quota policy.
 14. published artifacts are checksummed and tied to a Run-owned Workspace.
+15. Agent-generated code never executes inside the API process.
+16. Sandbox networking is disabled by default.
+17. Sandbox containers run non-root with dropped capabilities and bounded resources.
+18. generated files are validated before becoming Run Artifacts.
 
 ## Technology stack
 
@@ -143,6 +152,8 @@ Workspace
 | Streaming | SSE |
 | Workspace | Run-scoped persistent filesystem + metadata |
 | Artifact integrity | SHA-256 + MIME/size metadata |
+| Sandbox | Dedicated Docker daemon + ephemeral Python containers |
+| Sandbox policy | no network, read-only root, non-root, CPU/RAM/PID/time limits |
 | Frontend | Vue 3, TypeScript, Element Plus |
 | Quality | pytest, Ruff, mypy, GitHub Actions |
 
@@ -156,8 +167,8 @@ Phase 3  ✅ Agent Harness
 Phase 4  ✅ Tool / Skill Registry
 Phase 5  ✅ Durable Agent Runtime
 Phase 6  ✅ Workspace + Artifacts
-Phase 7  ⏭ Docker Sandbox
-Phase 8     Memory
+Phase 7  ✅ Docker Sandbox
+Phase 8  ⏭ Memory
 Phase 9     Context Engineering
 Phase 10    MCP + Enterprise Data
 Phase 11    Workflow + Multi-Agent
@@ -184,6 +195,7 @@ Manual end-to-end validation is intentionally deferred until all phases are fini
 - [Phase 4 Tool / Skill Registry](docs/10-phase4-tool-skill-registry.md)
 - [Phase 5 Durable Agent Runtime](docs/11-phase5-durable-agent-runtime.md)
 - [Phase 6 Workspace + Artifacts](docs/12-phase6-workspace-artifacts.md)
+- [Phase 7 Docker Sandbox](docs/13-phase7-docker-sandbox.md)
 
 ## License
 
