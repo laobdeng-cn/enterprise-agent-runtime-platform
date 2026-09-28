@@ -160,6 +160,10 @@ class DockerSandboxManager:
                     "earp.execution_id": str(execution_id),
                 },
             )
+            if container is None:
+                raise SandboxExecutionInfrastructureError(
+                    "Docker SDK did not return a sandbox container"
+                )
             await asyncio.to_thread(container.start)
 
             deadline = perf_counter() + self.limits.timeout_seconds
