@@ -5,6 +5,7 @@ import pytest
 
 from app.agents.harness.contracts import ModelToolCall
 from app.models.skill import Skill, SkillVersion
+from app.skills.contracts import SkillExecutionContext
 from app.skills.errors import SkillRetryableProviderError
 from app.skills.executor import SkillExecutor
 from app.skills.local_handlers import LOCAL_SKILL_HANDLERS
@@ -123,6 +124,7 @@ class FlakyAdapter(SkillProviderAdapter):
         self,
         version: SkillVersion,
         arguments: dict[str, Any],
+        context: SkillExecutionContext | None = None,
     ) -> Any:
         self.attempts += 1
         if self.attempts == 1:
