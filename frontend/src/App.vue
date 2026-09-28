@@ -109,10 +109,48 @@ interface ArtifactRecord {
   created_by: string;
 }
 
+interface SandboxHealth {
+  available: boolean;
+  image: string;
+  security: {
+    network_mode: string;
+    read_only: boolean;
+    memory_limit_mb: number;
+    cpu_limit: number;
+    pids_limit: number;
+    cap_drop: string[];
+    no_new_privileges: boolean;
+    user: string;
+    tmpfs_mb: number;
+    timeout_seconds: number;
+  };
+}
+
+interface SandboxResult {
+  execution_id: string;
+  run_id: string;
+  status: "SUCCEEDED" | "FAILED" | "TIMED_OUT";
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  timed_out: boolean;
+  stdout_truncated: boolean;
+  stderr_truncated: boolean;
+  artifacts: Array<{
+    artifact_id: string;
+    path: string;
+    display_name: string;
+    media_type: string;
+    size_bytes: number;
+    sha256: string;
+  }>;
+}
+
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
-const version = ref("0.5.0");
+const version = ref("0.7.0");
 
 const username = ref("");
 const password = ref("");
@@ -133,6 +171,15 @@ const workspace = ref<WorkspaceSummary | null>(null);
 const workingFiles = ref<WorkspaceEntry[]>([]);
 const artifacts = ref<ArtifactRecord[]>([]);
 const workspaceLoading = ref(false);
+const sandboxHealth = ref<SandboxHealth | null>(null);
+const sandboxCode = ref(
+  'from pathlib import Path\n' +
+    'text = "sandbox execution"\n' +
+    'Path("/workspace/output/result.txt").write_text(text.upper())\n' +
+    'print("sandbox-ok")',
+);
+const sandboxResult = ref<SandboxResult | null>(null);
+const sandboxLoading = ref(false);
 
 const overallType = computed(() => {
   if (backend.value === "checking") return "info";
@@ -164,6 +211,9 @@ const canReadWorkspace = computed(
 );
 const canReadArtifacts = computed(
   () => currentUser.value?.permissions.includes("artifact:read") ?? false,
+);
+const canExecuteSandbox = computed(
+  () => currentUser.value?.permissions.includes("sandbox:execute") ?? false,
 );
 
 function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -320,6 +370,56 @@ async function inspectWorkspace(run: RunRecord): Promise<void> {
   }
 }
 
+async function loadSandboxHealth(): Promise<void> {
+  if (!currentUser.value || !canExecuteSandbox.value) return;
+  try {
+    const response = await apiFetch("/api/sandbox/health");
+    if (response.ok) {
+      sandboxHealth.value = (await response.json()) as SandboxHealth;
+    }
+  } catch {
+    sandboxHealth.value = null;
+  }
+}
+
+async function executeSandbox(): Promise<void> {
+  if (!selectedRunId.value || !sandboxCode.value.trim() || !canExecuteSandbox.value) return;
+
+  sandboxLoading.value = true;
+  runtimeError.value = "";
+  sandboxResult.value = null;
+
+  try {
+    const response = await apiFetch(
+      `/api/runs/${selectedRunId.value}/sandbox/python`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: sandboxCode.value,
+          publish_artifacts: true,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      runtimeError.value = await response.text();
+      return;
+    }
+
+    sandboxResult.value = (await response.json()) as SandboxResult;
+    const selectedRun = runs.value.find((run) => run.id === selectedRunId.value);
+    await loadRuns();
+    if (selectedRun) {
+      await inspectWorkspace({ ...selectedRun, id: selectedRunId.value });
+    }
+  } catch {
+    runtimeError.value = "Sandbox Runtime API is unavailable.";
+  } finally {
+    sandboxLoading.value = false;
+  }
+}
+
 async function runAction(run: RunRecord, action: "start" | "resume" | "cancel"): Promise<void> {
   runtimeError.value = "";
   runtimeLoading.value = true;
@@ -357,13 +457,15 @@ function logout(): void {
   workspace.value = null;
   workingFiles.value = [];
   artifacts.value = [];
+  sandboxHealth.value = null;
+  sandboxResult.value = null;
   sessionStorage.removeItem("earp_access_token");
 }
 
 onMounted(async () => {
   await refreshHealth();
   await loadCurrentUser();
-  await Promise.all([loadAgents(), loadSkills(), loadRuns()]);
+  await Promise.all([loadAgents(), loadSkills(), loadRuns(), loadSandboxHealth()]);
 });
 </script>
 
@@ -372,14 +474,15 @@ onMounted(async () => {
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Workspace + Artifacts</h1>
+        <h1>Docker Sandbox Runtime</h1>
         <p class="subtitle">
-          Phase 6 gives every durable Run an isolated persistent workspace,
-          boundary-safe file capabilities, quotas, typed artifacts, and download metadata.
+          Phase 7 executes Python inside short-lived isolated containers with default-deny
+          networking, resource limits, Run-scoped read-only mounts, bounded output, and
+          automatic Artifact registration.
         </p>
       </div>
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 6 · v{{ version }}
+        Phase 7 · v{{ version }}
       </el-tag>
     </section>
 
@@ -446,14 +549,16 @@ onMounted(async () => {
       </el-card>
 
       <el-card shadow="never">
-        <template #header><strong>Workspace boundary</strong></template>
+        <template #header><strong>Sandbox boundary</strong></template>
         <div class="flow">
-          <span>input/</span><span>→</span><span>working/</span><span>→</span>
-          <span>artifacts/</span>
+          <span>Run Workspace</span><span>→</span><span>Ephemeral Container</span><span>→</span>
+          <span>Validated Artifacts</span>
         </div>
         <p class="muted">
-          Paths are resolved inside a Run-owned root. Traversal and symlinks are rejected,
-          while file size and total workspace quota are enforced.
+          {{ sandboxHealth?.available ? "Docker sandbox available" : "Sandbox health pending" }}
+          · network {{ sandboxHealth?.security.network_mode ?? "none" }}
+          · root FS {{ sandboxHealth?.security.read_only ? "read-only" : "policy-managed" }}
+          · user {{ sandboxHealth?.security.user ?? "65534:65534" }}
         </p>
       </el-card>
     </section>
@@ -578,6 +683,72 @@ onMounted(async () => {
             Cancel
           </el-button>
         </div>
+      </div>
+    </el-card>
+
+    <el-card
+      v-if="currentUser && selectedRunId && canExecuteSandbox"
+      class="status-card result-block"
+      shadow="never"
+    >
+      <template #header>
+        <div class="card-header">
+          <strong>Python Sandbox Console</strong>
+          <div class="tag-list">
+            <el-tag :type="sandboxHealth?.available ? 'success' : 'warning'">
+              {{ sandboxHealth?.available ? "daemon ready" : "health unknown" }}
+            </el-tag>
+            <el-tag type="info">{{ selectedRunId }}</el-tag>
+          </div>
+        </div>
+      </template>
+
+      <el-alert
+        title="Sandbox code can read /workspace/input and /workspace/working. Write generated files only to /workspace/output."
+        type="info"
+        :closable="false"
+      />
+
+      <el-input
+        v-model="sandboxCode"
+        type="textarea"
+        :rows="10"
+        class="result-block"
+      />
+
+      <div class="tag-list result-block">
+        <el-button
+          type="primary"
+          :loading="sandboxLoading"
+          :disabled="!sandboxCode.trim()"
+          @click="executeSandbox"
+        >
+          Execute isolated Python
+        </el-button>
+        <el-tag type="info">
+          {{ sandboxHealth?.security.cpu_limit ?? 1 }} CPU
+        </el-tag>
+        <el-tag type="info">
+          {{ sandboxHealth?.security.memory_limit_mb ?? 512 }} MB
+        </el-tag>
+        <el-tag type="info">
+          {{ sandboxHealth?.security.timeout_seconds ?? 60 }}s timeout
+        </el-tag>
+      </div>
+
+      <div v-if="sandboxResult" class="result-block">
+        <div class="tag-list">
+          <el-tag :type="statusType(sandboxResult.status)">
+            {{ sandboxResult.status }}
+          </el-tag>
+          <el-tag type="info">exit {{ sandboxResult.exit_code ?? "n/a" }}</el-tag>
+          <el-tag type="info">{{ sandboxResult.duration_ms.toFixed(1) }} ms</el-tag>
+          <el-tag type="success">{{ sandboxResult.artifacts.length }} artifact(s)</el-tag>
+        </div>
+        <p><strong>stdout</strong></p>
+        <pre>{{ sandboxResult.stdout || "(empty)" }}</pre>
+        <p v-if="sandboxResult.stderr"><strong>stderr</strong></p>
+        <pre v-if="sandboxResult.stderr">{{ sandboxResult.stderr }}</pre>
       </div>
     </el-card>
 
