@@ -2,7 +2,7 @@
 
 Vue 3 + TypeScript engineering console for Enterprise Agent Runtime Platform.
 
-## Current Phase 6 contents
+## Current Phase 7 contents
 
 - infrastructure health
 - authentication/current principal
@@ -14,7 +14,13 @@ Vue 3 + TypeScript engineering console for Enterprise Agent Runtime Platform.
 - workspace quota / usage display
 - working-directory file listing
 - Artifact metadata listing
+- Sandbox daemon policy summary
+- Run-scoped Python Sandbox editor
+- isolated execution trigger
+- Sandbox status / exit code / duration
+- bounded stdout/stderr display
+- generated Artifact count
 
-The console intentionally does not execute arbitrary code yet. Phase 7 adds Docker Sandbox execution and sandbox-generated artifact inspection.
+The Sandbox Console calls the same governed Run-scoped execution service used by the `python_execute` Agent Skill. It is an engineering/operator surface rather than a separate execution path.
 
 Manual end-to-end validation remains deferred until all planned phases are complete.
