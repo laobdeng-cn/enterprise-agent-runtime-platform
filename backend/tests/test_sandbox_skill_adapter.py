@@ -1,6 +1,4 @@
 import uuid
-from typing import Any
-
 import pytest
 
 from app.models.skill import Skill, SkillVersion
