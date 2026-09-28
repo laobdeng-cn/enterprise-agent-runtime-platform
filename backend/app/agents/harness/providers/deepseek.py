@@ -1,8 +1,14 @@
+import json
 from typing import Any
 
 import httpx
 
-from app.agents.harness.contracts import ModelRequest, ModelResponse, TokenUsage
+from app.agents.harness.contracts import (
+    ModelRequest,
+    ModelResponse,
+    ModelToolCall,
+    TokenUsage,
+)
 from app.agents.harness.errors import (
     ProviderAuthenticationError,
     ProviderConfigurationError,
@@ -40,13 +46,29 @@ class DeepSeekProvider(ModelProvider):
 
         payload: dict[str, Any] = {
             "model": request.model,
-            "messages": [message.model_dump() for message in request.messages],
+            "messages": [
+                message.provider_payload()
+                for message in request.messages
+            ],
             "stream": False,
         }
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                }
+                for tool in request.tools
+            ]
+            payload["tool_choice"] = "auto"
 
         try:
             async with httpx.AsyncClient(
@@ -85,16 +107,21 @@ class DeepSeekProvider(ModelProvider):
 
         try:
             data = response.json()
-            choices = data["choices"]
-            first_choice = choices[0]
-            content = first_choice["message"]["content"]
+            first_choice = data["choices"][0]
+            message = first_choice["message"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ProviderResponseError(
                 "DeepSeek returned an unexpected response shape"
             ) from exc
 
-        if not isinstance(content, str):
-            raise ProviderResponseError("DeepSeek response content is not text")
+        content_value = message.get("content")
+        content = content_value if isinstance(content_value, str) else ""
+        tool_calls = self._parse_tool_calls(message.get("tool_calls") or [])
+
+        if not content and not tool_calls:
+            raise ProviderResponseError(
+                "DeepSeek response contained neither text nor tool calls"
+            )
 
         usage_data = data.get("usage") or {}
         usage = TokenUsage(
@@ -110,4 +137,32 @@ class DeepSeekProvider(ModelProvider):
             finish_reason=first_choice.get("finish_reason"),
             usage=usage,
             response_id=str(data["id"]) if data.get("id") is not None else None,
+            tool_calls=tool_calls,
         )
+
+    @staticmethod
+    def _parse_tool_calls(raw_calls: list[Any]) -> list[ModelToolCall]:
+        parsed: list[ModelToolCall] = []
+        for raw_call in raw_calls:
+            try:
+                function = raw_call["function"]
+                raw_arguments = function.get("arguments") or "{}"
+                arguments = (
+                    json.loads(raw_arguments)
+                    if isinstance(raw_arguments, str)
+                    else raw_arguments
+                )
+                if not isinstance(arguments, dict):
+                    raise TypeError("Tool arguments must be an object")
+                parsed.append(
+                    ModelToolCall(
+                        id=str(raw_call["id"]),
+                        name=str(function["name"]),
+                        arguments=arguments,
+                    )
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ProviderResponseError(
+                    "DeepSeek returned an invalid tool call"
+                ) from exc
+        return parsed

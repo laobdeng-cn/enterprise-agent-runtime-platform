@@ -1,8 +1,17 @@
+import json
 from time import perf_counter
 from uuid import UUID
 
 from app.agents.harness.context import ContextBuilder
-from app.agents.harness.contracts import HarnessResult, ModelRequest
+from app.agents.harness.contracts import (
+    HarnessResult,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ModelToolDefinition,
+    TokenUsage,
+)
+from app.agents.harness.errors import HarnessError
 from app.agents.harness.hooks import (
     HarnessLifecycleContext,
     LifecycleHook,
@@ -10,6 +19,7 @@ from app.agents.harness.hooks import (
 )
 from app.agents.harness.registry import ModelProviderRegistry
 from app.models.agent import AgentVersion
+from app.skills.executor import SkillExecutor
 
 
 class AgentHarness:
@@ -17,12 +27,16 @@ class AgentHarness:
         self,
         *,
         providers: ModelProviderRegistry,
+        skill_executor: SkillExecutor | None = None,
         context_builder: ContextBuilder | None = None,
         lifecycle_hook: LifecycleHook | None = None,
+        max_tool_rounds: int = 4,
     ) -> None:
         self.providers = providers
+        self.skill_executor = skill_executor
         self.context_builder = context_builder or ContextBuilder()
         self.lifecycle_hook = lifecycle_hook or NoopLifecycleHook()
+        self.max_tool_rounds = max_tool_rounds
 
     async def run(
         self,
@@ -31,18 +45,15 @@ class AgentHarness:
         version: AgentVersion,
         user_input: str,
         additional_context: list[str] | None = None,
+        granted_permissions: set[str] | None = None,
     ) -> HarnessResult:
         context_package = self.context_builder.build(
             system_instructions=version.system_instructions,
             user_input=user_input,
             additional_context=additional_context,
         )
-        request = ModelRequest(
-            model=version.model_name,
-            messages=context_package.to_messages(),
-            temperature=version.temperature,
-            max_tokens=version.max_tokens,
-        )
+        messages = context_package.to_messages()
+        tools = self._tool_definitions(version)
         lifecycle_context = HarnessLifecycleContext(
             agent_id=agent_id,
             agent_version_id=version.id,
@@ -51,12 +62,98 @@ class AgentHarness:
             model=version.model_name,
         )
         provider = self.providers.resolve(version.model_provider)
-
-        await self.lifecycle_hook.before_model_call(lifecycle_context, request)
         started_at = perf_counter()
+        total_usage = TokenUsage()
+        tool_results: list[dict[str, object]] = []
+        response_ids: list[str] = []
 
+        for tool_round in range(self.max_tool_rounds + 1):
+            request = ModelRequest(
+                model=version.model_name,
+                messages=messages,
+                temperature=version.temperature,
+                max_tokens=version.max_tokens,
+                tools=tools,
+            )
+            response = await self._invoke_model(
+                provider=provider,
+                lifecycle_context=lifecycle_context,
+                request=request,
+            )
+            self._accumulate_usage(total_usage, response.usage)
+            if response.response_id:
+                response_ids.append(response.response_id)
+
+            if not response.tool_calls:
+                return HarnessResult(
+                    agent_id=agent_id,
+                    agent_version_id=version.id,
+                    agent_version=version.version,
+                    content=response.content,
+                    provider=response.provider,
+                    model=response.model,
+                    finish_reason=response.finish_reason,
+                    usage=total_usage,
+                    duration_ms=(perf_counter() - started_at) * 1000,
+                    tool_results=tool_results,
+                    metadata={
+                        "response_ids": response_ids,
+                        "tool_rounds": tool_round,
+                    },
+                )
+
+            if tool_round >= self.max_tool_rounds:
+                raise HarnessError(
+                    f"Agent exceeded maximum tool rounds ({self.max_tool_rounds})"
+                )
+            if self.skill_executor is None:
+                raise HarnessError(
+                    "Model proposed a tool call but no SkillExecutor is configured"
+                )
+
+            messages.append(
+                ModelMessage(
+                    role="assistant",
+                    content=response.content or None,
+                    tool_calls=response.tool_calls,
+                )
+            )
+
+            for call in response.tool_calls:
+                result = await self.skill_executor.execute(
+                    call,
+                    bound_versions=list(version.bound_skill_versions),
+                    granted_permissions=set(granted_permissions or set()),
+                )
+                result_payload = result.model_dump(mode="json")
+                tool_results.append(result_payload)
+                messages.append(
+                    ModelMessage(
+                        role="tool",
+                        tool_call_id=call.id,
+                        content=json.dumps(
+                            result_payload,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                    )
+                )
+
+        raise HarnessError("Agent Harness reached an unreachable tool-loop state")
+
+    async def _invoke_model(
+        self,
+        *,
+        provider: object,
+        lifecycle_context: HarnessLifecycleContext,
+        request: ModelRequest,
+    ) -> ModelResponse:
+        await self.lifecycle_hook.before_model_call(
+            lifecycle_context,
+            request,
+        )
         try:
-            response = await provider.invoke(request)
+            response = await provider.invoke(request)  # type: ignore[attr-defined]
         except Exception as exc:
             await self.lifecycle_hook.on_model_error(
                 lifecycle_context,
@@ -65,22 +162,28 @@ class AgentHarness:
             )
             raise
 
-        duration_ms = (perf_counter() - started_at) * 1000
         await self.lifecycle_hook.after_model_call(
             lifecycle_context,
             request,
             response,
         )
+        return response
 
-        return HarnessResult(
-            agent_id=agent_id,
-            agent_version_id=version.id,
-            agent_version=version.version,
-            content=response.content,
-            provider=response.provider,
-            model=response.model,
-            finish_reason=response.finish_reason,
-            usage=response.usage,
-            duration_ms=duration_ms,
-            metadata={"response_id": response.response_id},
-        )
+    @staticmethod
+    def _tool_definitions(version: AgentVersion) -> list[ModelToolDefinition]:
+        definitions = [
+            ModelToolDefinition(
+                name=skill_version.skill.name,
+                description=skill_version.skill.description,
+                parameters=dict(skill_version.input_schema),
+            )
+            for skill_version in version.bound_skill_versions
+            if skill_version.skill.status == "active"
+        ]
+        return sorted(definitions, key=lambda item: item.name)
+
+    @staticmethod
+    def _accumulate_usage(total: TokenUsage, usage: TokenUsage) -> None:
+        total.prompt_tokens += usage.prompt_tokens
+        total.completion_tokens += usage.completion_tokens
+        total.total_tokens += usage.total_tokens

@@ -7,6 +7,8 @@ from app.agents.harness.contracts import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    ModelToolCall,
+    ModelToolDefinition,
     TokenUsage,
 )
 from app.agents.harness.runner import AgentHarness
@@ -19,5 +21,7 @@ __all__ = [
     "ModelMessage",
     "ModelRequest",
     "ModelResponse",
+    "ModelToolCall",
+    "ModelToolDefinition",
     "TokenUsage",
 ]

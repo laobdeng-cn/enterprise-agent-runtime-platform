@@ -1,12 +1,51 @@
+import json
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
+class ModelToolDefinition(BaseModel):
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+class ModelToolCall(BaseModel):
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
 class ModelMessage(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[ModelToolCall] = Field(default_factory=list)
+
+    def provider_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"role": self.role}
+        if self.content is not None:
+            payload["content"] = self.content
+        if self.tool_call_id is not None:
+            payload["tool_call_id"] = self.tool_call_id
+        if self.tool_calls:
+            payload["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": json.dumps(
+                            call.arguments,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                    },
+                }
+                for call in self.tool_calls
+            ]
+        return payload
 
 
 class TokenUsage(BaseModel):
@@ -20,15 +59,17 @@ class ModelRequest(BaseModel):
     messages: list[ModelMessage]
     temperature: float | None = None
     max_tokens: int | None = None
+    tools: list[ModelToolDefinition] = Field(default_factory=list)
 
 
 class ModelResponse(BaseModel):
-    content: str
+    content: str = ""
     provider: str
     model: str
     finish_reason: str | None = None
     usage: TokenUsage = Field(default_factory=TokenUsage)
     response_id: str | None = None
+    tool_calls: list[ModelToolCall] = Field(default_factory=list)
 
 
 class ContextPackage(BaseModel):
@@ -74,4 +115,5 @@ class HarnessResult(BaseModel):
     finish_reason: str | None
     usage: TokenUsage
     duration_ms: float
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
