@@ -2,18 +2,18 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-4%20Tool%20%2F%20Skill%20Registry-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-5%20Durable%20Agent%20Runtime-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
-[![DeepSeek](https://img.shields.io/badge/DeepSeek-tool%20calling-informational)](#tool--skill-runtime)
+[![DeepSeek](https://img.shields.io/badge/DeepSeek-provider-informational)](#technology-stack)
 
 ## Overview
 
-Enterprise Agent Runtime Platform is a governed runtime for enterprise AI agents rather than a thin chat wrapper.
+Enterprise Agent Runtime Platform is a governed execution platform rather than a thin LLM chat wrapper.
 
-**Phase 4 is implemented.** Versioned Agents can now receive explicit versioned Skills. DeepSeek tool calls are normalized, validated, authorized, executed through provider adapters, and returned to the model through a bounded Harness loop.
+**Phase 5 is implemented.** Agents and Skills now execute inside a durable Run lifecycle backed by PostgreSQL, with steps, tool-call records, checkpoints, bounded retry, pause/resume/cancel semantics, persisted SSE events, and restart recovery.
 
-## Current execution boundary
+## Current architecture
 
 ```text
 Authenticated Principal
@@ -21,98 +21,61 @@ Authenticated Principal
        RBAC
         |
         v
-AgentVersion
+     AgentRun
         |
-        +--> concrete bound SkillVersions
-        |
-        v
-Agent Harness
-        |
-        v
-DeepSeek tool selection
+        +--> concrete AgentVersion
+        +--> RunStep[]
+        +--> RunCheckpoint[]
+        +--> RunEvent[]
+        +--> ToolCall[]
         |
         v
-SkillExecutor
-  ├── bound-skill check
-  ├── JSON Schema input validation
-  ├── permission check
-  ├── timeout / retry
-  ├── provider adapter
-  └── JSON Schema output validation
+ Durable Runtime
         |
         v
-structured tool result
+   Agent Harness
         |
-        +--> model final response
+        +--> DeepSeek
+        |
+        +--> bound SkillVersions
+                |
+                v
+           SkillExecutor
 ```
 
-The model never grants itself capabilities. A tool not bound to the AgentVersion cannot execute.
+## Durable runtime
 
-## Phase 4 capabilities
-
-- `Skill` / `SkillVersion` persistence
-- `AgentVersion ↔ SkillVersion` immutable-style binding
-- Skill provider registry
-- local Skill adapter
-- registered local handlers only
-- JSON Schema input/output validation
-- per-Skill permission metadata
-- side-effect classification
-- execution timeout
-- bounded retry
-- normalized Skill errors
-- DeepSeek function/tool-call parsing
-- bounded model ↔ tool loop
-- Skill results returned to the model
-- safe seeded Skills: `system_echo`, `math_add`, `text_stats`
-- Skill management/execution APIs
-- Skill Registry frontend view
-
-## Quick start
-
-The project remains Docker Compose based. Local end-to-end validation is intentionally deferred until all planned phases are implemented.
-
-Configuration templates remain in `.env.example`. Real model execution requires:
+A Run is not a single HTTP request.
 
 ```text
-DEEPSEEK_API_KEY=<your-key>
-DEEPSEEK_BASE_URL=https://api.deepseek.com
+PENDING
+  ↓
+RUNNING
+  ├── RETRYING -> RUNNING
+  ├── PAUSED -> RUNNING
+  ├── COMPLETED
+  ├── FAILED
+  └── CANCELLED
 ```
 
-## APIs
+Every transition is validated by the runtime state machine.
 
-Agent definitions:
+The runtime stores checkpoints in PostgreSQL. If the backend restarts while a Run is `RUNNING` or `RETRYING`, startup recovery moves it to `PAUSED`, preserves history, writes a recovery checkpoint, and requires explicit resume.
+
+## Run API
 
 ```text
-GET  /api/agents
-POST /api/agents
-GET  /api/agents/{agent_id}
-POST /api/agents/{agent_id}/versions
-POST /api/agents/{agent_id}/versions/{version_id}/activate
-POST /api/agents/{agent_id}/preview
+GET  /api/runs
+POST /api/runs
+GET  /api/runs/{run_id}
+POST /api/runs/{run_id}/start
+POST /api/runs/{run_id}/pause
+POST /api/runs/{run_id}/resume
+POST /api/runs/{run_id}/cancel
+GET  /api/runs/{run_id}/events
 ```
 
-Skill Registry:
-
-```text
-GET  /api/skills
-POST /api/skills
-GET  /api/skills/{skill_id}
-POST /api/skills/{skill_id}/versions
-POST /api/skills/{skill_id}/versions/{version_id}/activate
-POST /api/skills/{skill_id}/execute
-```
-
-Example Agent version capability declaration:
-
-```json
-{
-  "system_instructions": "Use tools when useful.",
-  "model_provider": "deepseek",
-  "model_name": "deepseek-chat",
-  "skills": ["math_add", "text_stats"]
-}
-```
+The events endpoint is SSE and supports `Last-Event-ID` for reconnect.
 
 ## Current persistence
 
@@ -132,20 +95,27 @@ Capabilities
 ├── skills
 ├── skill_versions
 └── agent_version_skills
+
+Durable Runtime
+├── agent_runs
+├── run_steps
+├── tool_calls
+├── run_checkpoints
+└── run_events
 ```
 
 ## Runtime invariants
 
-1. LLM output is untrusted.
-2. The model sees only explicitly bound Skills.
-3. Tool arguments are JSON Schema validated before execution.
-4. Required permissions are checked outside the model.
-5. Provider adapters are registered by the application, not chosen as arbitrary code paths by the model.
-6. Tool timeouts and retries are bounded.
-7. Tool outputs are schema validated before returning to the model.
-8. Side-effect metadata is platform-controlled.
-9. Existing AgentVersions continue pointing to concrete SkillVersions even when a Skill's active version later changes.
-10. Durable Run semantics remain the responsibility of Phase 5.
+1. The LLM never grants permissions.
+2. A Run captures a concrete AgentVersion.
+3. The model sees only bound SkillVersions.
+4. Skill arguments are validated before execution.
+5. current execution permissions are re-evaluated rather than trusting only the creation-time snapshot.
+6. Run transitions are validated centrally.
+7. retries are bounded and only retry classified failures.
+8. PostgreSQL is the source of truth for resumable execution state.
+9. process restart cannot silently erase an active Run.
+10. framework-specific graph state does not replace the platform's public domain model.
 
 ## Technology stack
 
@@ -156,8 +126,9 @@ Capabilities
 | Auth | JWT, Argon2, RBAC |
 | Runtime cache | Redis 7 |
 | Model provider | DeepSeek |
-| Model transport | httpx |
 | Skill schema | JSON Schema Draft 2020-12 |
+| Durable runtime | PostgreSQL Run/Step/Checkpoint/Event model |
+| Streaming | SSE |
 | Frontend | Vue 3, TypeScript, Element Plus |
 | Quality | pytest, Ruff, mypy, GitHub Actions |
 
@@ -169,8 +140,8 @@ Phase 1  ✅ Engineering Skeleton
 Phase 2  ✅ Authentication + RBAC
 Phase 3  ✅ Agent Harness
 Phase 4  ✅ Tool / Skill Registry
-Phase 5  ⏭ Durable Agent Runtime
-Phase 6     Workspace + Artifacts
+Phase 5  ✅ Durable Agent Runtime
+Phase 6  ⏭ Workspace + Artifacts
 Phase 7     Docker Sandbox
 Phase 8     Memory
 Phase 9     Context Engineering
@@ -181,6 +152,8 @@ Phase 13    Trace + Observability
 Phase 14    Agent Evaluation + Regression
 Phase 15    Enterprise Demo + Hardening
 ```
+
+Manual end-to-end validation is intentionally deferred until all phases are finished. CI continues to validate every phase as it is merged.
 
 ## Documentation
 
@@ -195,6 +168,7 @@ Phase 15    Enterprise Demo + Hardening
 - [Phase 2 Authentication & RBAC](docs/08-phase2-auth-rbac.md)
 - [Phase 3 Agent Harness](docs/09-phase3-agent-harness.md)
 - [Phase 4 Tool / Skill Registry](docs/10-phase4-tool-skill-registry.md)
+- [Phase 5 Durable Agent Runtime](docs/11-phase5-durable-agent-runtime.md)
 
 ## License
 

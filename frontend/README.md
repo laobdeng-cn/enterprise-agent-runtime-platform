@@ -1,18 +1,20 @@
 # Frontend
 
-Vue 3 + TypeScript operations console for Enterprise Agent Runtime Platform.
+Vue 3 + TypeScript engineering console for Enterprise Agent Runtime Platform.
 
-## Current Phase 4 contents
+## Current Phase 5 contents
 
+- infrastructure health
 - authentication/current principal
-- infrastructure status
-- Skill Registry view
-- Agent creation
-- explicit Skill multi-select binding
-- Agent list/version selection
-- Harness preview
-- model/token/latency/tool-result metadata
+- Agent selection
+- Skill registry overview
+- durable Run creation
+- PENDING Run start
+- PAUSED Run resume
+- Run cancellation
+- Run state/attempt/step/checkpoint/tool-call summary
+- normalized Run error display
 
-The UI intentionally remains an engineering console. Durable Run timelines begin in Phase 5.
+Live trace visualization is intentionally deferred to Phase 13. Phase 5 exposes the durable SSE endpoint from the backend and keeps the UI focused on lifecycle control.
 
-Manual end-to-end validation is deferred until all planned phases are complete.
+Manual end-to-end validation remains deferred until all planned phases are complete.

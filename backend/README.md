@@ -1,59 +1,54 @@
 # Backend
 
-FastAPI control plane and Agent execution backend for Enterprise Agent Runtime Platform.
+FastAPI control plane and execution backend for Enterprise Agent Runtime Platform.
 
-## Current Phase 4 contents
+## Current Phase 5 contents
 
-- JWT authentication + RBAC
+- JWT authentication and RBAC
 - versioned Agent / AgentVersion
-- DeepSeek ModelProvider adapter
-- Agent Harness lifecycle
 - versioned Skill / SkillVersion
-- AgentVersion ↔ concrete SkillVersion binding
-- JSON Schema validation
-- Skill provider registry
-- local Skill adapter
-- permission-aware SkillExecutor
-- timeout and bounded retry envelope
-- model tool-call normalization
-- bounded model/tool loop
-- Skill CRUD/version/execute APIs
-- Alembic migrations through 0004
+- DeepSeek Agent Harness
+- schema-validated Skill execution
+- durable AgentRun persistence
+- RunStep history
+- ToolCall persistence
+- RunCheckpoint persistence
+- durable RunEvent stream
+- explicit lifecycle state machine
+- bounded runtime retry
+- pause / resume / cancel
+- startup recovery for interrupted Runs
+- SSE Run events
+- Alembic migrations through 0005
 
-## Safe local Skills
-
-Startup seed creates:
-
-```text
-system_echo
-math_add
-text_stats
-```
-
-They are read-only and require `skill:execute`.
-
-## Boundaries
+## Durable execution boundary
 
 ```text
-API
- -> Application Service
- -> AgentHarness
- -> ModelProvider
-
-Model tool proposal
- -> SkillExecutor
- -> schema validation
- -> authorization
- -> registered SkillProviderAdapter
- -> output validation
- -> model
+Run API
+ -> Durable Runtime
+ -> Agent Harness
+ -> Model / Skills
+ -> persisted result, error, steps, tool calls, checkpoints and events
 ```
 
-No HTTP handler directly calls DeepSeek or a Skill handler.
+PostgreSQL is authoritative for recovery. Redis is available for later coordination but is not the only copy of Run state.
+
+## Run API
+
+```text
+GET  /api/runs
+POST /api/runs
+GET  /api/runs/{run_id}
+POST /api/runs/{run_id}/start
+POST /api/runs/{run_id}/pause
+POST /api/runs/{run_id}/resume
+POST /api/runs/{run_id}/cancel
+GET  /api/runs/{run_id}/events
+```
 
 ## Validation
 
-Automated CI runs:
+CI executes:
 
 ```bash
 ruff check app tests
@@ -61,6 +56,6 @@ mypy app
 pytest
 ```
 
-It also boots the full Docker Compose stack, seeds RBAC/Skills, executes `math_add`, and verifies AgentVersion Skill bindings.
+Docker Compose CI additionally validates migration 0005, durable Run creation, restart persistence, normalized execution failure, Run history, checkpoints, and SSE lifecycle events.
 
-Manual end-to-end validation is deferred until all project phases are complete.
+Manual local validation remains deferred until all phases are complete.
