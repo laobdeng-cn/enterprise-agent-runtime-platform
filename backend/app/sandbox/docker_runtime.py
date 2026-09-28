@@ -40,6 +40,9 @@ class DockerSandboxManager:
         self._image_ready = False
         self._image_lock = asyncio.Lock()
 
+    async def close(self) -> None:
+        await asyncio.to_thread(self.client.close)
+
     async def ping(self) -> bool:
         try:
             return bool(await asyncio.to_thread(self.client.ping))
