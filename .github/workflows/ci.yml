@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
   integration:
-    name: Docker Compose Agent Harness smoke test
+    name: Docker Compose Tool Skill Registry smoke test
     runs-on: ubuntu-latest
     env:
       JWT_SECRET_KEY: ci-only-secret-key-not-for-production
@@ -87,31 +87,41 @@ jobs:
           TOKEN=$(curl --fail --silent --show-error             -H 'Content-Type: application/json'             -d '{"username":"ci-admin","password":"ci-admin-password-123"}'             http://localhost:8000/api/auth/login             | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
           echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-      - name: Verify RBAC and Agent version persistence
+      - name: Verify seeded Skill registry and safe execution
         run: |
-          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/auth/me
+          SKILLS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/skills)
 
+          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; assert {'system_echo','math_add','text_stats'} <= names"
+
+          MATH_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); print(next(item['id'] for item in data if item['name']=='math_add'))")
+
+          EXECUTED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"left":2,"right":3}}'             http://localhost:8000/api/skills/"$MATH_ID"/execute)
+
+          printf '%s' "$EXECUTED" | python -c             "import json,sys; data=json.load(sys.stdin)['result']; assert data['ok'] is True; assert data['output']['result'] == 5.0"
+
+      - name: Verify Agent Skill binding persistence
+        run: |
           CREATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{
-              "name":"ci-harness-agent",
-              "description":"CI Agent Harness smoke test",
-              "system_instructions":"You are a deterministic CI test agent.",
+              "name":"ci-skill-agent",
+              "description":"CI Phase 4 binding test",
+              "system_instructions":"Use bound skills when useful.",
               "model_provider":"deepseek",
               "model_name":"deepseek-chat",
-              "temperature":0.2
+              "temperature":0.2,
+              "skills":["math_add","text_stats"]
             }'             http://localhost:8000/api/agents)
 
-          AGENT_ID=$(printf '%s' "$CREATED"             | python -c "import json,sys; print(json.load(sys.stdin)['id'])")
-
-          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/agents/"$AGENT_ID"
+          AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; data=json.load(sys.stdin); assert data['versions'][0]['skills'] == ['math_add','text_stats']; print(data['id'])")
 
           UPDATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{
-              "system_instructions":"You are version two of the CI test agent.",
+              "system_instructions":"Version two uses only echo.",
               "model_provider":"deepseek",
               "model_name":"deepseek-chat",
-              "temperature":0.1
+              "temperature":0.1,
+              "skills":["system_echo"]
             }'             http://localhost:8000/api/agents/"$AGENT_ID"/versions)
 
-          printf '%s' "$UPDATED" | python -c             "import json,sys; data=json.load(sys.stdin); assert len(data['versions']) == 2; assert data['active_version_id'] == data['versions'][1]['id']"
+          printf '%s' "$UPDATED" | python -c             "import json,sys; data=json.load(sys.stdin); assert len(data['versions']) == 2; assert data['active_version_id'] == data['versions'][1]['id']; assert data['versions'][1]['skills'] == ['system_echo']"
 
       - name: Verify frontend
         run: curl --fail --silent --show-error http://localhost:5173/ > /dev/null

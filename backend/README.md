@@ -2,73 +2,65 @@
 
 FastAPI control plane and Agent execution backend for Enterprise Agent Runtime Platform.
 
-## Current Phase 3 contents
+## Current Phase 4 contents
 
-- Python 3.12 / FastAPI
-- async SQLAlchemy / PostgreSQL
-- Redis connectivity
-- Alembic migrations
-- JWT authentication and RBAC
-- versioned `Agent` / `AgentVersion`
-- normalized ModelRequest / ModelResponse contracts
-- ModelProvider abstraction
-- DeepSeek provider adapter
-- Provider Registry
-- basic Context Package / Context Builder
-- Agent Harness runner
-- lifecycle hooks
-- Agent CRUD/version APIs
-- Harness preview API
-- pytest, Ruff, and mypy
+- JWT authentication + RBAC
+- versioned Agent / AgentVersion
+- DeepSeek ModelProvider adapter
+- Agent Harness lifecycle
+- versioned Skill / SkillVersion
+- AgentVersion ↔ concrete SkillVersion binding
+- JSON Schema validation
+- Skill provider registry
+- local Skill adapter
+- permission-aware SkillExecutor
+- timeout and bounded retry envelope
+- model tool-call normalization
+- bounded model/tool loop
+- Skill CRUD/version/execute APIs
+- Alembic migrations through 0004
 
-## Local development
+## Safe local Skills
 
-From `backend/`:
-
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-alembic upgrade head
-python -m app.scripts.seed_rbac
-uvicorn app.main:app --reload
-```
-
-For an actual model preview configure:
+Startup seed creates:
 
 ```text
-DEEPSEEK_API_KEY=<your-key>
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_TIMEOUT_SECONDS=60
+system_echo
+math_add
+text_stats
 ```
 
-## Agent API
+They are read-only and require `skill:execute`.
+
+## Boundaries
 
 ```text
-GET  /api/agents
-POST /api/agents
-GET  /api/agents/{agent_id}
-POST /api/agents/{agent_id}/versions
-POST /api/agents/{agent_id}/versions/{version_id}/activate
-POST /api/agents/{agent_id}/preview
+API
+ -> Application Service
+ -> AgentHarness
+ -> ModelProvider
+
+Model tool proposal
+ -> SkillExecutor
+ -> schema validation
+ -> authorization
+ -> registered SkillProviderAdapter
+ -> output validation
+ -> model
 ```
 
-The preview endpoint performs a single model invocation through the Harness. It is not yet a durable AgentRun.
-
-## Harness boundary
-
-```text
-API -> Application Service -> AgentHarness -> Provider Registry -> DeepSeekProvider
-```
-
-API handlers do not make provider HTTP calls.
+No HTTP handler directly calls DeepSeek or a Skill handler.
 
 ## Validation
 
+Automated CI runs:
+
 ```bash
-pytest
 ruff check app tests
 mypy app
+pytest
 ```
 
-Phase 4 adds Tool / Skill binding. Phase 5 adds durable Run state, steps, checkpoints and retry semantics.
+It also boots the full Docker Compose stack, seeds RBAC/Skills, executes `math_add`, and verifies AgentVersion Skill bindings.
+
+Manual end-to-end validation is deferred until all project phases are complete.
