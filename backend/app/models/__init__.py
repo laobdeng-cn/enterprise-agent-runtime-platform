@@ -1,5 +1,11 @@
-"""Persistence models.
+"""Persistence model registry."""
 
-Domain tables are introduced from Phase 2 onward. Import model modules here so
-Alembic can discover their metadata.
-"""
+from app.models.identity import Permission, Role, User, role_permissions, user_roles
+
+__all__ = [
+    "Permission",
+    "Role",
+    "User",
+    "role_permissions",
+    "user_roles",
+]

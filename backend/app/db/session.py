@@ -1,4 +1,5 @@
 import logging
+from collections.abc import AsyncIterator
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -18,6 +19,11 @@ async_session_maker = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+
+async def get_db() -> AsyncIterator[AsyncSession]:
+    async with async_session_maker() as session:
+        yield session
 
 
 async def database_ping() -> bool:
