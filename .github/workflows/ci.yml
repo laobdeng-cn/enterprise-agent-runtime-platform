@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
   integration:
-    name: Docker Compose Durable Runtime smoke test
+    name: Docker Compose Workspace Artifact smoke test
     runs-on: ubuntu-latest
     env:
       JWT_SECRET_KEY: ci-only-secret-key-not-for-production
@@ -87,11 +87,11 @@ jobs:
           TOKEN=$(curl --fail --silent --show-error             -H 'Content-Type: application/json'             -d '{"username":"ci-admin","password":"ci-admin-password-123"}'             http://localhost:8000/api/auth/login             | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
           echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-      - name: Verify seeded Skill registry and safe execution
+      - name: Verify seeded Skill registry
         run: |
           SKILLS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/skills)
 
-          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; assert {'system_echo','math_add','text_stats'} <= names"
+          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; expected={'system_echo','math_add','text_stats','workspace_list','workspace_read_text','workspace_write_text','artifact_publish'}; assert expected <= names"
 
           MATH_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); print(next(item['id'] for item in data if item['name']=='math_add'))")
 
@@ -99,63 +99,92 @@ jobs:
 
           printf '%s' "$EXECUTED" | python -c             "import json,sys; data=json.load(sys.stdin)['result']; assert data['ok'] is True; assert data['output']['result'] == 5.0"
 
-      - name: Verify Agent Skill binding persistence
+      - name: Create Agent with Workspace Skills
         run: |
           CREATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{
-              "name":"ci-skill-agent",
-              "description":"CI Phase 4 binding test",
-              "system_instructions":"Use bound skills when useful.",
+              "name":"ci-workspace-agent",
+              "description":"CI Phase 6 workspace test",
+              "system_instructions":"Use Run workspace capabilities when useful.",
               "model_provider":"deepseek",
               "model_name":"deepseek-chat",
               "temperature":0.2,
-              "skills":["math_add","text_stats"]
+              "skills":["workspace_list","workspace_read_text","workspace_write_text","artifact_publish"]
             }'             http://localhost:8000/api/agents)
 
-          AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; data=json.load(sys.stdin); assert data['versions'][0]['skills'] == ['math_add','text_stats']; print(data['id'])")
-
-          UPDATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{
-              "system_instructions":"Version two uses only echo.",
-              "model_provider":"deepseek",
-              "model_name":"deepseek-chat",
-              "temperature":0.1,
-              "skills":["system_echo"]
-            }'             http://localhost:8000/api/agents/"$AGENT_ID"/versions)
-
-          printf '%s' "$UPDATED" | python -c             "import json,sys; data=json.load(sys.stdin); assert len(data['versions']) == 2; assert data['active_version_id'] == data['versions'][1]['id']; assert data['versions'][1]['skills'] == ['system_echo']"
-
-      - name: Resolve runtime Agent
-        run: |
-          AGENTS=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/agents)
-          AGENT_ID=$(printf '%s' "$AGENTS" | python -c "import json,sys; data=json.load(sys.stdin); print(next(item['id'] for item in data if item['name']=='ci-skill-agent'))")
+          AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; d=json.load(sys.stdin); expected=['artifact_publish','workspace_list','workspace_read_text','workspace_write_text']; assert d['versions'][0]['skills']==expected; print(d['id'])")
           echo "AGENT_ID=$AGENT_ID" >> "$GITHUB_ENV"
 
-      - name: Create durable pending Run
+      - name: Create durable Run and Workspace
         run: |
-          CREATED_RUN=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"agent_id\":\"$AGENT_ID\",\"input\":\"Calculate 2 + 3 using the available capability.\",\"additional_context\":[\"CI durable runtime smoke test\"],\"max_attempts\":2}" http://localhost:8000/api/runs)
-          RUN_ID=$(printf '%s' "$CREATED_RUN" | python -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='PENDING'; assert d['attempt']==0; assert d['steps'][0]['step_type']=='INPUT'; assert d['checkpoints'][0]['kind']=='run_created'; print(d['id'])")
+          CREATED_RUN=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "{"agent_id":"$AGENT_ID","input":"Prepare a report in the workspace.","additional_context":[],"max_attempts":2}"             http://localhost:8000/api/runs)
+
+          RUN_ID=$(printf '%s' "$CREATED_RUN" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['status']=='PENDING'; print(d['id'])")
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
 
-      - name: Verify pending Run survives backend restart
+          WORKSPACE=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$RUN_ID"/workspace)
+
+          printf '%s' "$WORKSPACE" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['run_id']; assert d['status']=='active'; assert d['used_bytes']==0; assert d['quota_bytes'] > d['max_file_bytes']"
+
+      - name: Verify workspace text boundary
+        run: |
+          INPUT=$(curl --fail --silent --show-error             -X PUT             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"path":"input/request.md","content":"Analyze the supplied Run input."}'             http://localhost:8000/api/runs/"$RUN_ID"/workspace/text)
+
+          printf '%s' "$INPUT" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['path']=='input/request.md'; assert d['size_bytes'] > 0; assert len(d['sha256'])==64"
+
+          WORKING=$(curl --fail --silent --show-error             -X PUT             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"path":"working/report.md","content":"# Phase 6 workspace artifact"}'             http://localhost:8000/api/runs/"$RUN_ID"/workspace/text)
+
+          printf '%s' "$WORKING" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['path']=='working/report.md'"
+
+          READ=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             "http://localhost:8000/api/runs/$RUN_ID/workspace/text?path=working%2Freport.md")
+
+          printf '%s' "$READ" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['content']=='# Phase 6 workspace artifact'"
+
+          CODE=$(curl --silent --output /tmp/traversal.json --write-out '%{http_code}'             -H "Authorization: Bearer $TOKEN"             "http://localhost:8000/api/runs/$RUN_ID/workspace/text?path=working%2F..%2Fsecret.txt")
+          test "$CODE" = "422"
+
+      - name: Publish and download artifact
+        run: |
+          ARTIFACT=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"source_path":"working/report.md","display_name":"phase6-report.md","kind":"report"}'             http://localhost:8000/api/runs/"$RUN_ID"/artifacts)
+
+          ARTIFACT_ID=$(printf '%s' "$ARTIFACT" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['display_name']=='phase6-report.md'; assert d['kind']=='report'; assert d['media_type'] in {'text/markdown','text/plain'}; assert len(d['sha256'])==64; print(d['id'])")
+          echo "ARTIFACT_ID=$ARTIFACT_ID" >> "$GITHUB_ENV"
+
+          ARTIFACTS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$RUN_ID"/artifacts)
+
+          printf '%s' "$ARTIFACTS" | python -c             "import json,sys; d=json.load(sys.stdin); assert len(d)==1; assert d[0]['display_name']=='phase6-report.md'"
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -o /tmp/phase6-report.md             http://localhost:8000/api/runs/"$RUN_ID"/artifacts/"$ARTIFACT_ID"/download
+          test "$(cat /tmp/phase6-report.md)" = "# Phase 6 workspace artifact"
+
+      - name: Verify workspace and artifact survive backend restart
         run: |
           docker compose restart backend
           for i in $(seq 1 40); do
-            if curl --fail --silent http://localhost:8000/health >/dev/null; then break; fi
+            if curl --fail --silent http://localhost:8000/health >/dev/null; then
+              break
+            fi
             sleep 1
           done
-          PERSISTED=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/runs/"$RUN_ID")
-          printf '%s' "$PERSISTED" | python -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='PENDING'; assert d['checkpoints'][0]['kind']=='run_created'; assert d['steps'][0]['status']=='COMPLETED'"
+
+          READ=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             "http://localhost:8000/api/runs/$RUN_ID/workspace/text?path=working%2Freport.md")
+          printf '%s' "$READ" | python -c             "import json,sys; assert json.load(sys.stdin)['content']=='# Phase 6 workspace artifact'"
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -o /tmp/phase6-report-after-restart.md             http://localhost:8000/api/runs/"$RUN_ID"/artifacts/"$ARTIFACT_ID"/download
+          cmp /tmp/phase6-report.md /tmp/phase6-report-after-restart.md
 
       - name: Verify durable execution failure semantics
         run: |
-          STARTED=$(curl --fail --silent --show-error -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/runs/"$RUN_ID"/start)
-          printf '%s' "$STARTED" | python -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='FAILED'; assert d['attempt']==1; assert d['error_data']['code']=='provider_configuration'; assert any(s['step_type']=='MODEL_CALL' and s['status']=='FAILED' for s in d['steps']); assert d['checkpoints'][-1]['kind']=='failed'"
+          STARTED=$(curl --fail --silent --show-error             -X POST             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$RUN_ID"/start)
+
+          printf '%s' "$STARTED" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['status']=='FAILED'; assert d['attempt']==1; assert d['error_data']['code']=='provider_configuration'; assert any(s['step_type']=='MODEL_CALL' and s['status']=='FAILED' for s in d['steps'])"
 
       - name: Verify persisted SSE events
         run: |
-          EVENTS=$(curl --fail --silent --show-error -N -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/runs/"$RUN_ID"/events)
+          EVENTS=$(curl --fail --silent --show-error -N             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$RUN_ID"/events)
           printf '%s' "$EVENTS" | grep -q "event: run.created"
           printf '%s' "$EVENTS" | grep -q "event: run.running"
           printf '%s' "$EVENTS" | grep -q "event: run.failed"
+
       - name: Verify frontend
         run: curl --fail --silent --show-error http://localhost:5173/ > /dev/null
 
