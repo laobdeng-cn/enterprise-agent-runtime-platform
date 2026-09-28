@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
   integration:
-    name: Docker Compose Tool Skill Registry smoke test
+    name: Docker Compose Durable Runtime smoke test
     runs-on: ubuntu-latest
     env:
       JWT_SECRET_KEY: ci-only-secret-key-not-for-production
@@ -123,6 +123,39 @@ jobs:
 
           printf '%s' "$UPDATED" | python -c             "import json,sys; data=json.load(sys.stdin); assert len(data['versions']) == 2; assert data['active_version_id'] == data['versions'][1]['id']; assert data['versions'][1]['skills'] == ['system_echo']"
 
+      - name: Resolve runtime Agent
+        run: |
+          AGENTS=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/agents)
+          AGENT_ID=$(printf '%s' "$AGENTS" | python -c "import json,sys; data=json.load(sys.stdin); print(next(item['id'] for item in data if item['name']=='ci-skill-agent'))")
+          echo "AGENT_ID=$AGENT_ID" >> "$GITHUB_ENV"
+
+      - name: Create durable pending Run
+        run: |
+          CREATED_RUN=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"agent_id\":\"$AGENT_ID\",\"input\":\"Calculate 2 + 3 using the available capability.\",\"additional_context\":[\"CI durable runtime smoke test\"],\"max_attempts\":2}" http://localhost:8000/api/runs)
+          RUN_ID=$(printf '%s' "$CREATED_RUN" | python -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='PENDING'; assert d['attempt']==0; assert d['steps'][0]['step_type']=='INPUT'; assert d['checkpoints'][0]['kind']=='run_created'; print(d['id'])")
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+
+      - name: Verify pending Run survives backend restart
+        run: |
+          docker compose restart backend
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://localhost:8000/health >/dev/null; then break; fi
+            sleep 1
+          done
+          PERSISTED=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/runs/"$RUN_ID")
+          printf '%s' "$PERSISTED" | python -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='PENDING'; assert d['checkpoints'][0]['kind']=='run_created'; assert d['steps'][0]['status']=='COMPLETED'"
+
+      - name: Verify durable execution failure semantics
+        run: |
+          STARTED=$(curl --fail --silent --show-error -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/runs/"$RUN_ID"/start)
+          printf '%s' "$STARTED" | python -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='FAILED'; assert d['attempt']==1; assert d['error_data']['code']=='provider_configuration'; assert any(s['step_type']=='MODEL_CALL' and s['status']=='FAILED' for s in d['steps']); assert d['checkpoints'][-1]['kind']=='failed'"
+
+      - name: Verify persisted SSE events
+        run: |
+          EVENTS=$(curl --fail --silent --show-error -N -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/runs/"$RUN_ID"/events)
+          printf '%s' "$EVENTS" | grep -q "event: run.created"
+          printf '%s' "$EVENTS" | grep -q "event: run.running"
+          printf '%s' "$EVENTS" | grep -q "event: run.failed"
       - name: Verify frontend
         run: curl --fail --silent --show-error http://localhost:5173/ > /dev/null
 
