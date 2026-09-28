@@ -38,6 +38,7 @@ from app.services.agents import (
     list_agents,
 )
 from app.services.harness import agent_harness
+from app.services.skills import SkillBindingError
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -67,6 +68,10 @@ def to_agent_response(agent: Agent) -> AgentResponse:
                 temperature=version.temperature,
                 max_tokens=version.max_tokens,
                 context_policy=dict(version.context_policy),
+                skills=sorted(
+                    skill_version.skill.name
+                    for skill_version in version.bound_skill_versions
+                ),
             )
             for version in agent.versions
         ],
@@ -97,6 +102,11 @@ async def agents_create(
     except AgentConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except SkillBindingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
 
@@ -142,6 +152,11 @@ async def agent_versions_create(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+    except SkillBindingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
     return to_agent_response(agent)
 
@@ -171,7 +186,7 @@ async def agent_versions_activate(
 async def agent_preview(
     agent_id: UUID,
     payload: AgentInvokeRequest,
-    _: AgentRunner,
+    principal: AgentRunner,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentInvokeResponse:
     try:
@@ -179,6 +194,7 @@ async def agent_preview(
             session,
             agent_harness,
             agent_id,
+            principal=principal,
             user_input=payload.input,
             additional_context=payload.additional_context,
         )
@@ -232,4 +248,5 @@ async def agent_preview(
         finish_reason=result.finish_reason,
         usage=result.usage,
         duration_ms=result.duration_ms,
+        tool_results=result.tool_results,
     )

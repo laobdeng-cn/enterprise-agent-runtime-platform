@@ -9,7 +9,10 @@ from app.agents.harness.contracts import HarnessResult
 from app.agents.harness.runner import AgentHarness
 from app.models.agent import Agent, AgentVersion
 from app.models.identity import User
+from app.models.skill import SkillVersion
 from app.schemas.agent import AgentCreate, AgentVersionCreate
+from app.services.auth import permission_codes
+from app.services.skills import resolve_active_skill_versions
 
 
 class AgentNotFoundError(LookupError):
@@ -28,23 +31,32 @@ class AgentHasNoActiveVersionError(ValueError):
     pass
 
 
-async def list_agents(session: AsyncSession) -> list[Agent]:
-    statement = (
-        select(Agent)
-        .options(selectinload(Agent.versions))
-        .order_by(Agent.name)
+def _agent_load_options() -> tuple[object, object]:
+    versions = (
+        selectinload(Agent.versions)
+        .selectinload(AgentVersion.bound_skill_versions)
+        .selectinload(SkillVersion.skill)
     )
+    active = (
+        selectinload(Agent.active_version)
+        .selectinload(AgentVersion.bound_skill_versions)
+        .selectinload(SkillVersion.skill)
+    )
+    return versions, active
+
+
+async def list_agents(session: AsyncSession) -> list[Agent]:
+    versions, active = _agent_load_options()
+    statement = select(Agent).options(versions, active).order_by(Agent.name)
     result = await session.execute(statement)
     return list(result.scalars().unique().all())
 
 
 async def get_agent(session: AsyncSession, agent_id: UUID) -> Agent:
+    versions, active = _agent_load_options()
     statement = (
         select(Agent)
-        .options(
-            selectinload(Agent.versions),
-            selectinload(Agent.active_version),
-        )
+        .options(versions, active)
         .where(Agent.id == agent_id)
         .execution_options(populate_existing=True)
     )
@@ -60,6 +72,10 @@ async def create_agent(
     principal: User,
     payload: AgentCreate,
 ) -> Agent:
+    bound_skills = await resolve_active_skill_versions(
+        session,
+        payload.skills,
+    )
     agent = Agent(
         name=payload.name.strip(),
         description=payload.description,
@@ -80,6 +96,7 @@ async def create_agent(
             max_tokens=payload.max_tokens,
             context_policy=dict(payload.context_policy),
             created_by_user_id=principal.id,
+            bound_skill_versions=bound_skills,
         )
         session.add(version)
         await session.flush()
@@ -102,6 +119,10 @@ async def create_agent_version(
     payload: AgentVersionCreate,
 ) -> Agent:
     agent = await get_agent(session, agent_id)
+    bound_skills = await resolve_active_skill_versions(
+        session,
+        payload.skills,
+    )
 
     max_version_result = await session.execute(
         select(func.max(AgentVersion.version)).where(
@@ -120,6 +141,7 @@ async def create_agent_version(
         max_tokens=payload.max_tokens,
         context_policy=dict(payload.context_policy),
         created_by_user_id=principal.id,
+        bound_skill_versions=bound_skills,
     )
     session.add(version)
     await session.flush()
@@ -157,6 +179,7 @@ async def invoke_active_agent(
     harness: AgentHarness,
     agent_id: UUID,
     *,
+    principal: User,
     user_input: str,
     additional_context: list[str],
 ) -> HarnessResult:
@@ -172,4 +195,5 @@ async def invoke_active_agent(
         version=version,
         user_input=user_input,
         additional_context=additional_context,
+        granted_permissions=permission_codes(principal),
     )

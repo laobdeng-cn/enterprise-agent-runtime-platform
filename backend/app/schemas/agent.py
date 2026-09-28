@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -13,6 +13,7 @@ class AgentVersionConfig(BaseModel):
     temperature: float | None = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1, le=65536)
     context_policy: dict[str, object] = Field(default_factory=dict)
+    skills: list[str] = Field(default_factory=list, max_length=32)
 
 
 class AgentCreate(AgentVersionConfig):
@@ -33,6 +34,7 @@ class AgentVersionResponse(BaseModel):
     temperature: float | None
     max_tokens: int | None
     context_policy: dict[str, object]
+    skills: list[str]
 
 
 class AgentResponse(BaseModel):
@@ -59,3 +61,4 @@ class AgentInvokeResponse(BaseModel):
     finish_reason: str | None
     usage: TokenUsage
     duration_ms: float
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)

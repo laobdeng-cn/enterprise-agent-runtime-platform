@@ -8,7 +8,16 @@ from app.skills.providers.local import LocalSkillAdapter
 from app.skills.registry import SkillProviderRegistry
 
 
-def build_agent_harness() -> AgentHarness:
+def build_skill_executor() -> SkillExecutor:
+    skill_providers = SkillProviderRegistry()
+    skill_providers.register(
+        "local",
+        LocalSkillAdapter(LOCAL_SKILL_HANDLERS),
+    )
+    return SkillExecutor(skill_providers)
+
+
+def build_agent_harness(executor: SkillExecutor) -> AgentHarness:
     model_providers = ModelProviderRegistry()
     model_providers.register(
         "deepseek",
@@ -18,17 +27,11 @@ def build_agent_harness() -> AgentHarness:
             timeout_seconds=settings.deepseek_timeout_seconds,
         ),
     )
-
-    skill_providers = SkillProviderRegistry()
-    skill_providers.register(
-        "local",
-        LocalSkillAdapter(LOCAL_SKILL_HANDLERS),
-    )
-
     return AgentHarness(
         providers=model_providers,
-        skill_executor=SkillExecutor(skill_providers),
+        skill_executor=executor,
     )
 
 
-agent_harness = build_agent_harness()
+skill_executor = build_skill_executor()
+agent_harness = build_agent_harness(skill_executor)
