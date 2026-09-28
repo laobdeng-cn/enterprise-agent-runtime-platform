@@ -46,6 +46,7 @@ async def get_agent(session: AsyncSession, agent_id: UUID) -> Agent:
             selectinload(Agent.active_version),
         )
         .where(Agent.id == agent_id)
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(statement)
     agent = result.scalar_one_or_none()
