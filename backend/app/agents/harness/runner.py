@@ -17,6 +17,7 @@ from app.agents.harness.hooks import (
     LifecycleHook,
     NoopLifecycleHook,
 )
+from app.agents.harness.providers.base import ModelProvider
 from app.agents.harness.registry import ModelProviderRegistry
 from app.models.agent import AgentVersion
 from app.skills.executor import SkillExecutor
@@ -144,7 +145,7 @@ class AgentHarness:
     async def _invoke_model(
         self,
         *,
-        provider: object,
+        provider: ModelProvider,
         lifecycle_context: HarnessLifecycleContext,
         request: ModelRequest,
     ) -> ModelResponse:
@@ -153,7 +154,7 @@ class AgentHarness:
             request,
         )
         try:
-            response = await provider.invoke(request)  # type: ignore[attr-defined]
+            response = await provider.invoke(request)
         except Exception as exc:
             await self.lifecycle_hook.on_model_error(
                 lifecycle_context,
