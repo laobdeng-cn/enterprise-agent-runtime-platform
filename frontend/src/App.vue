@@ -81,6 +81,34 @@ interface RunRecord {
   tool_calls: Array<Record<string, unknown>>;
 }
 
+interface WorkspaceSummary {
+  id: string;
+  run_id: string;
+  status: string;
+  quota_bytes: number;
+  max_file_bytes: number;
+  used_bytes: number;
+  created_at: string;
+}
+
+interface WorkspaceEntry {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  size_bytes: number;
+}
+
+interface ArtifactRecord {
+  id: string;
+  relative_path: string;
+  display_name: string;
+  kind: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+  created_by: string;
+}
+
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
@@ -100,6 +128,11 @@ const selectedAgentId = ref("");
 const runInput = ref("Summarize this task and use the available capabilities when useful.");
 const runtimeError = ref("");
 const runtimeLoading = ref(false);
+const selectedRunId = ref("");
+const workspace = ref<WorkspaceSummary | null>(null);
+const workingFiles = ref<WorkspaceEntry[]>([]);
+const artifacts = ref<ArtifactRecord[]>([]);
+const workspaceLoading = ref(false);
 
 const overallType = computed(() => {
   if (backend.value === "checking") return "info";
@@ -125,6 +158,12 @@ const canUpdateRuns = computed(
 );
 const canCancelRuns = computed(
   () => currentUser.value?.permissions.includes("run:cancel") ?? false,
+);
+const canReadWorkspace = computed(
+  () => currentUser.value?.permissions.includes("workspace:read") ?? false,
+);
+const canReadArtifacts = computed(
+  () => currentUser.value?.permissions.includes("artifact:read") ?? false,
 );
 
 function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -246,6 +285,41 @@ async function createRun(): Promise<void> {
   }
 }
 
+async function inspectWorkspace(run: RunRecord): Promise<void> {
+  if (!canReadWorkspace.value) return;
+  workspaceLoading.value = true;
+  runtimeError.value = "";
+  selectedRunId.value = run.id;
+
+  try {
+    const [workspaceResponse, filesResponse, artifactsResponse] = await Promise.all([
+      apiFetch(`/api/runs/${run.id}/workspace`),
+      apiFetch(`/api/runs/${run.id}/workspace/files?path=working`),
+      canReadArtifacts.value
+        ? apiFetch(`/api/runs/${run.id}/artifacts`)
+        : Promise.resolve(null),
+    ]);
+
+    if (!workspaceResponse.ok || !filesResponse.ok) {
+      runtimeError.value = "Could not inspect the Run workspace.";
+      return;
+    }
+
+    workspace.value = (await workspaceResponse.json()) as WorkspaceSummary;
+    workingFiles.value = (await filesResponse.json()) as WorkspaceEntry[];
+
+    if (artifactsResponse?.ok) {
+      artifacts.value = (await artifactsResponse.json()) as ArtifactRecord[];
+    } else {
+      artifacts.value = [];
+    }
+  } catch {
+    runtimeError.value = "Workspace API is unavailable.";
+  } finally {
+    workspaceLoading.value = false;
+  }
+}
+
 async function runAction(run: RunRecord, action: "start" | "resume" | "cancel"): Promise<void> {
   runtimeError.value = "";
   runtimeLoading.value = true;
@@ -279,6 +353,10 @@ function logout(): void {
   skills.value = [];
   runs.value = [];
   selectedAgentId.value = "";
+  selectedRunId.value = "";
+  workspace.value = null;
+  workingFiles.value = [];
+  artifacts.value = [];
   sessionStorage.removeItem("earp_access_token");
 }
 
@@ -294,14 +372,14 @@ onMounted(async () => {
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Durable Agent Runtime</h1>
+        <h1>Workspace + Artifacts</h1>
         <p class="subtitle">
-          Phase 5 adds durable Run state, steps, checkpoints, bounded retry,
-          cooperative lifecycle controls, persisted SSE events, and restart recovery.
+          Phase 6 gives every durable Run an isolated persistent workspace,
+          boundary-safe file capabilities, quotas, typed artifacts, and download metadata.
         </p>
       </div>
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 5 · v{{ version }}
+        Phase 6 · v{{ version }}
       </el-tag>
     </section>
 
@@ -368,14 +446,14 @@ onMounted(async () => {
       </el-card>
 
       <el-card shadow="never">
-        <template #header><strong>Runtime lifecycle</strong></template>
+        <template #header><strong>Workspace boundary</strong></template>
         <div class="flow">
-          <span>PENDING</span><span>→</span><span>RUNNING</span><span>→</span>
-          <span>RETRYING / PAUSED</span><span>→</span>
-          <span>COMPLETED / FAILED / CANCELLED</span>
+          <span>input/</span><span>→</span><span>working/</span><span>→</span>
+          <span>artifacts/</span>
         </div>
         <p class="muted">
-          Run state and checkpoints live in PostgreSQL. Redis is not the source of truth.
+          Paths are resolved inside a Run-owned root. Traversal and symlinks are rejected,
+          while file size and total workspace quota are enforced.
         </p>
       </el-card>
     </section>
@@ -481,6 +559,15 @@ onMounted(async () => {
             Resume
           </el-button>
           <el-button
+            v-if="canReadWorkspace"
+            size="small"
+            plain
+            :loading="workspaceLoading && selectedRunId === run.id"
+            @click="inspectWorkspace(run)"
+          >
+            Workspace
+          </el-button>
+          <el-button
             v-if="!['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status) && canCancelRuns"
             size="small"
             type="danger"
@@ -490,6 +577,78 @@ onMounted(async () => {
           >
             Cancel
           </el-button>
+        </div>
+      </div>
+    </el-card>
+
+    <el-card
+      v-if="currentUser && workspace"
+      class="status-card result-block"
+      shadow="never"
+    >
+      <template #header>
+        <div class="card-header">
+          <strong>Workspace Inspector</strong>
+          <el-tag type="info">{{ selectedRunId }}</el-tag>
+        </div>
+      </template>
+
+      <div class="status-grid">
+        <div class="status-item">
+          <span>Used</span>
+          <strong>{{ workspace.used_bytes }} bytes</strong>
+        </div>
+        <div class="status-item">
+          <span>Quota</span>
+          <strong>{{ workspace.quota_bytes }} bytes</strong>
+        </div>
+        <div class="status-item">
+          <span>Max file</span>
+          <strong>{{ workspace.max_file_bytes }} bytes</strong>
+        </div>
+        <div class="status-item">
+          <span>Status</span>
+          <el-tag type="success">{{ workspace.status }}</el-tag>
+        </div>
+      </div>
+
+      <div class="agent-grid result-block">
+        <div>
+          <h3>working/</h3>
+          <el-empty
+            v-if="workingFiles.length === 0"
+            description="No working files"
+          />
+          <div
+            v-for="file in workingFiles"
+            :key="file.path"
+            class="status-item"
+          >
+            <span>{{ file.path }}</span>
+            <el-tag type="info">{{ file.size_bytes }} B</el-tag>
+          </div>
+        </div>
+
+        <div v-if="canReadArtifacts">
+          <h3>Artifacts</h3>
+          <el-empty
+            v-if="artifacts.length === 0"
+            description="No published artifacts"
+          />
+          <div
+            v-for="artifact in artifacts"
+            :key="artifact.id"
+            class="status-item"
+          >
+            <div>
+              <strong>{{ artifact.display_name }}</strong>
+              <p class="muted">
+                {{ artifact.kind }} · {{ artifact.media_type }} ·
+                {{ artifact.size_bytes }} B
+              </p>
+            </div>
+            <el-tag type="success">published</el-tag>
+          </div>
         </div>
       </div>
     </el-card>
