@@ -29,12 +29,6 @@ interface CurrentUser {
 interface AgentVersion {
   id: string;
   version: number;
-  system_instructions: string;
-  model_provider: string;
-  model_name: string;
-  temperature: number | null;
-  max_tokens: number | null;
-  context_policy: Record<string, unknown>;
   skills: string[];
 }
 
@@ -47,46 +41,50 @@ interface Agent {
   versions: AgentVersion[];
 }
 
-interface SkillVersion {
-  id: string;
-  version: number;
-  required_permissions: string[];
-  side_effect: string;
-  timeout_seconds: number;
-  max_attempts: number;
-}
-
 interface Skill {
   id: string;
   name: string;
   description: string;
   provider_type: string;
   status: string;
-  active_version_id: string | null;
-  versions: SkillVersion[];
 }
 
-interface AgentInvokeResponse {
+interface RunStep {
+  id: string;
+  sequence: number;
+  step_type: string;
+  status: string;
+  attempt: number;
+}
+
+interface RunCheckpoint {
+  id: string;
+  sequence: number;
+  state: string;
+  kind: string;
+}
+
+interface RunRecord {
+  id: string;
   agent_id: string;
   agent_version_id: string;
-  agent_version: number;
-  content: string;
-  provider: string;
-  model: string;
-  finish_reason: string | null;
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-  duration_ms: number;
-  tool_results: Array<Record<string, unknown>>;
+  status: string;
+  input: string;
+  attempt: number;
+  max_attempts: number;
+  state_version: number;
+  error_data: Record<string, unknown> | null;
+  result_data: Record<string, unknown> | null;
+  created_at: string;
+  steps: RunStep[];
+  checkpoints: RunCheckpoint[];
+  tool_calls: Array<Record<string, unknown>>;
 }
 
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
-const version = ref("0.4.0");
+const version = ref("0.5.0");
 
 const username = ref("");
 const password = ref("");
@@ -96,17 +94,12 @@ const token = ref(sessionStorage.getItem("earp_access_token") ?? "");
 const currentUser = ref<CurrentUser | null>(null);
 
 const agents = ref<Agent[]>([]);
-const agentsLoading = ref(false);
 const skills = ref<Skill[]>([]);
-const skillsLoading = ref(false);
-const agentError = ref("");
-const newAgentName = ref("");
-const newAgentInstructions = ref("You are a concise enterprise assistant.");
-const selectedNewAgentSkills = ref<string[]>([]);
+const runs = ref<RunRecord[]>([]);
 const selectedAgentId = ref("");
-const previewInput = ref("");
-const previewLoading = ref(false);
-const previewResult = ref<AgentInvokeResponse | null>(null);
+const runInput = ref("Summarize this task and use the available capabilities when useful.");
+const runtimeError = ref("");
+const runtimeLoading = ref(false);
 
 const overallType = computed(() => {
   if (backend.value === "checking") return "info";
@@ -118,16 +111,20 @@ const overallType = computed(() => {
 const canReadAgents = computed(
   () => currentUser.value?.permissions.includes("agent:read") ?? false,
 );
-const canCreateAgents = computed(
-  () => currentUser.value?.permissions.includes("agent:create") ?? false,
-);
 const canReadSkills = computed(
   () => currentUser.value?.permissions.includes("skill:read") ?? false,
 );
-const canRunAgents = computed(
-  () =>
-    (currentUser.value?.permissions.includes("agent:read") ?? false) &&
-    (currentUser.value?.permissions.includes("run:create") ?? false),
+const canReadRuns = computed(
+  () => currentUser.value?.permissions.includes("run:read") ?? false,
+);
+const canCreateRuns = computed(
+  () => currentUser.value?.permissions.includes("run:create") ?? false,
+);
+const canUpdateRuns = computed(
+  () => currentUser.value?.permissions.includes("run:update") ?? false,
+);
+const canCancelRuns = computed(
+  () => currentUser.value?.permissions.includes("run:cancel") ?? false,
 );
 
 function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -142,7 +139,6 @@ async function refreshHealth(): Promise<void> {
   backend.value = "checking";
   database.value = "checking";
   redis.value = "checking";
-
   try {
     const response = await fetch("/health");
     const payload = (await response.json()) as HealthResponse;
@@ -162,61 +158,41 @@ async function loadCurrentUser(): Promise<void> {
     currentUser.value = null;
     return;
   }
-
   const response = await apiFetch("/api/auth/me");
   if (!response.ok) {
     logout();
     return;
   }
-
   currentUser.value = (await response.json()) as CurrentUser;
 }
 
 async function loadAgents(): Promise<void> {
-  if (!currentUser.value || !canReadAgents.value) {
-    agents.value = [];
-    return;
-  }
-
-  agentsLoading.value = true;
-  agentError.value = "";
-  try {
-    const response = await apiFetch("/api/agents");
-    if (!response.ok) {
-      agentError.value = await response.text();
-      return;
-    }
-    agents.value = (await response.json()) as Agent[];
-    if (!selectedAgentId.value && agents.value.length > 0) {
-      selectedAgentId.value = agents.value[0].id;
-    }
-  } catch {
-    agentError.value = "Agent API is unavailable.";
-  } finally {
-    agentsLoading.value = false;
+  if (!currentUser.value || !canReadAgents.value) return;
+  const response = await apiFetch("/api/agents");
+  if (!response.ok) return;
+  agents.value = (await response.json()) as Agent[];
+  if (!selectedAgentId.value && agents.value.length > 0) {
+    selectedAgentId.value = agents.value[0].id;
   }
 }
 
 async function loadSkills(): Promise<void> {
-  if (!currentUser.value || !canReadSkills.value) {
-    skills.value = [];
-    return;
-  }
+  if (!currentUser.value || !canReadSkills.value) return;
+  const response = await apiFetch("/api/skills");
+  if (!response.ok) return;
+  skills.value = (await response.json()) as Skill[];
+}
 
-  skillsLoading.value = true;
-  try {
-    const response = await apiFetch("/api/skills");
-    if (!response.ok) return;
-    skills.value = (await response.json()) as Skill[];
-  } finally {
-    skillsLoading.value = false;
-  }
+async function loadRuns(): Promise<void> {
+  if (!currentUser.value || !canReadRuns.value) return;
+  const response = await apiFetch("/api/runs");
+  if (!response.ok) return;
+  runs.value = (await response.json()) as RunRecord[];
 }
 
 async function login(): Promise<void> {
   authError.value = "";
   authLoading.value = true;
-
   try {
     const response = await fetch("/api/auth/login", {
       method: "POST",
@@ -226,18 +202,16 @@ async function login(): Promise<void> {
         password: password.value,
       }),
     });
-
     if (!response.ok) {
       authError.value = "Invalid username or password.";
       return;
     }
-
     const payload = (await response.json()) as LoginResponse;
     token.value = payload.access_token;
     sessionStorage.setItem("earp_access_token", payload.access_token);
     password.value = "";
     await loadCurrentUser();
-    await Promise.all([loadAgents(), loadSkills()]);
+    await Promise.all([loadAgents(), loadSkills(), loadRuns()]);
   } catch {
     authError.value = "Authentication service is unavailable.";
   } finally {
@@ -245,71 +219,57 @@ async function login(): Promise<void> {
   }
 }
 
-async function createAgent(): Promise<void> {
-  if (!newAgentName.value.trim() || !newAgentInstructions.value.trim()) return;
-
-  agentError.value = "";
+async function createRun(): Promise<void> {
+  if (!selectedAgentId.value || !runInput.value.trim()) return;
+  runtimeError.value = "";
+  runtimeLoading.value = true;
   try {
-    const response = await apiFetch("/api/agents", {
+    const response = await apiFetch("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: newAgentName.value.trim(),
-        description: "Created from the Phase 4 console.",
-        system_instructions: newAgentInstructions.value,
-        model_provider: "deepseek",
-        model_name: "deepseek-chat",
-        temperature: 0.2,
-        skills: selectedNewAgentSkills.value,
+        agent_id: selectedAgentId.value,
+        input: runInput.value.trim(),
+        additional_context: [],
+        max_attempts: 2,
       }),
     });
-
     if (!response.ok) {
-      agentError.value = await response.text();
+      runtimeError.value = await response.text();
       return;
     }
-
-    const created = (await response.json()) as Agent;
-    newAgentName.value = "";
-    selectedNewAgentSkills.value = [];
-    selectedAgentId.value = created.id;
-    await loadAgents();
+    await loadRuns();
   } catch {
-    agentError.value = "Could not create Agent.";
+    runtimeError.value = "Durable Runtime API is unavailable.";
+  } finally {
+    runtimeLoading.value = false;
   }
 }
 
-async function previewAgent(): Promise<void> {
-  if (!selectedAgentId.value || !previewInput.value.trim()) return;
-
-  previewLoading.value = true;
-  previewResult.value = null;
-  agentError.value = "";
-
+async function runAction(run: RunRecord, action: "start" | "resume" | "cancel"): Promise<void> {
+  runtimeError.value = "";
+  runtimeLoading.value = true;
   try {
-    const response = await apiFetch(
-      `/api/agents/${selectedAgentId.value}/preview`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: previewInput.value,
-          additional_context: [],
-        }),
-      },
-    );
-
+    const response = await apiFetch(`/api/runs/${run.id}/${action}`, {
+      method: "POST",
+    });
     if (!response.ok) {
-      agentError.value = await response.text();
+      runtimeError.value = await response.text();
       return;
     }
-
-    previewResult.value = (await response.json()) as AgentInvokeResponse;
+    await loadRuns();
   } catch {
-    agentError.value = "Harness preview request failed.";
+    runtimeError.value = `Run ${action} failed.`;
   } finally {
-    previewLoading.value = false;
+    runtimeLoading.value = false;
   }
+}
+
+function statusType(status: string): "success" | "warning" | "danger" | "info" {
+  if (status === "COMPLETED") return "success";
+  if (status === "FAILED" || status === "CANCELLED") return "danger";
+  if (status === "PAUSED" || status === "RETRYING") return "warning";
+  return "info";
 }
 
 function logout(): void {
@@ -317,16 +277,15 @@ function logout(): void {
   currentUser.value = null;
   agents.value = [];
   skills.value = [];
+  runs.value = [];
   selectedAgentId.value = "";
-  selectedNewAgentSkills.value = [];
-  previewResult.value = null;
   sessionStorage.removeItem("earp_access_token");
 }
 
 onMounted(async () => {
   await refreshHealth();
   await loadCurrentUser();
-  await Promise.all([loadAgents(), loadSkills()]);
+  await Promise.all([loadAgents(), loadSkills(), loadRuns()]);
 });
 </script>
 
@@ -335,46 +294,29 @@ onMounted(async () => {
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Tool / Skill Registry</h1>
+        <h1>Durable Agent Runtime</h1>
         <p class="subtitle">
-          Phase 4 adds versioned Skills, JSON Schema validation, RBAC-aware execution,
-          bounded timeout/retry handling, and dynamic Skill binding for Agent versions.
+          Phase 5 adds durable Run state, steps, checkpoints, bounded retry,
+          cooperative lifecycle controls, persisted SSE events, and restart recovery.
         </p>
       </div>
-
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 4 · v{{ version }}
+        Phase 5 · v{{ version }}
       </el-tag>
     </section>
 
     <el-card class="status-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>Local infrastructure</span>
+          <span>Infrastructure</span>
           <el-button text type="primary" @click="refreshHealth">Refresh</el-button>
         </div>
       </template>
-
       <div class="status-grid">
         <div class="status-item"><span>Frontend</span><el-tag type="success">ok</el-tag></div>
-        <div class="status-item">
-          <span>Backend</span>
-          <el-tag :type="backend === 'ok' ? 'success' : backend === 'checking' ? 'info' : 'danger'">
-            {{ backend }}
-          </el-tag>
-        </div>
-        <div class="status-item">
-          <span>PostgreSQL</span>
-          <el-tag :type="database === 'ok' ? 'success' : database === 'checking' ? 'info' : 'danger'">
-            {{ database }}
-          </el-tag>
-        </div>
-        <div class="status-item">
-          <span>Redis</span>
-          <el-tag :type="redis === 'ok' ? 'success' : redis === 'checking' ? 'info' : 'danger'">
-            {{ redis }}
-          </el-tag>
-        </div>
+        <div class="status-item"><span>Backend</span><el-tag :type="backend === 'ok' ? 'success' : 'danger'">{{ backend }}</el-tag></div>
+        <div class="status-item"><span>PostgreSQL</span><el-tag :type="database === 'ok' ? 'success' : 'danger'">{{ database }}</el-tag></div>
+        <div class="status-item"><span>Redis</span><el-tag :type="redis === 'ok' ? 'success' : 'danger'">{{ redis }}</el-tag></div>
       </div>
     </el-card>
 
@@ -386,28 +328,10 @@ onMounted(async () => {
             <el-input v-model="username" autocomplete="username" />
           </el-form-item>
           <el-form-item label="Password">
-            <el-input
-              v-model="password"
-              type="password"
-              show-password
-              autocomplete="current-password"
-              @keyup.enter="login"
-            />
+            <el-input v-model="password" type="password" show-password @keyup.enter="login" />
           </el-form-item>
-          <el-alert
-            v-if="authError"
-            :title="authError"
-            type="error"
-            show-icon
-            :closable="false"
-            class="auth-alert"
-          />
-          <el-button
-            type="primary"
-            :loading="authLoading"
-            :disabled="!username || !password"
-            @click="login"
-          >
+          <el-alert v-if="authError" :title="authError" type="error" :closable="false" />
+          <el-button type="primary" :loading="authLoading" @click="login">
             Authenticate
           </el-button>
         </el-form>
@@ -429,10 +353,10 @@ onMounted(async () => {
             </dd>
           </div>
           <div>
-            <dt>Permissions</dt>
+            <dt>Run permissions</dt>
             <dd class="tag-list">
               <el-tag
-                v-for="permission in currentUser.permissions"
+                v-for="permission in currentUser.permissions.filter((item) => item.startsWith('run:'))"
                 :key="permission"
                 type="info"
               >
@@ -444,66 +368,21 @@ onMounted(async () => {
       </el-card>
 
       <el-card shadow="never">
-        <template #header><strong>Controlled execution boundary</strong></template>
+        <template #header><strong>Runtime lifecycle</strong></template>
         <div class="flow">
-          <span>LLM Tool Call</span><span>→</span><span>Bound SkillVersion</span>
-          <span>→</span><span>JSON Schema</span><span>→</span>
-          <span>RBAC</span><span>→</span><span>Timeout / Retry</span>
+          <span>PENDING</span><span>→</span><span>RUNNING</span><span>→</span>
+          <span>RETRYING / PAUSED</span><span>→</span>
+          <span>COMPLETED / FAILED / CANCELLED</span>
         </div>
         <p class="muted">
-          Tool arguments are untrusted model output. They are validated and authorized
-          before any provider adapter executes them.
+          Run state and checkpoints live in PostgreSQL. Redis is not the source of truth.
         </p>
       </el-card>
     </section>
 
-    <section v-if="currentUser && canReadAgents" class="agent-grid">
-      <el-card v-if="canCreateAgents" shadow="never">
-        <template #header><strong>Create versioned Agent</strong></template>
-        <el-form label-position="top">
-          <el-form-item label="Agent name">
-            <el-input v-model="newAgentName" placeholder="research-assistant" />
-          </el-form-item>
-          <el-form-item label="System instructions">
-            <el-input
-              v-model="newAgentInstructions"
-              type="textarea"
-              :rows="5"
-            />
-          </el-form-item>
-          <el-form-item v-if="canReadSkills" label="Bound Skills">
-            <el-select
-              v-model="selectedNewAgentSkills"
-              multiple
-              clearable
-              placeholder="Select only the capabilities this Agent may use"
-            >
-              <el-option
-                v-for="skill in skills"
-                :key="skill.id"
-                :label="skill.name"
-                :value="skill.name"
-              />
-            </el-select>
-          </el-form-item>
-          <el-button
-            type="primary"
-            :disabled="!newAgentName.trim() || !newAgentInstructions.trim()"
-            @click="createAgent"
-          >
-            Create Agent v1
-          </el-button>
-        </el-form>
-      </el-card>
-
+    <section v-if="currentUser && canCreateRuns" class="agent-grid">
       <el-card shadow="never">
-        <template #header>
-          <div class="card-header">
-            <strong>Harness + Skills preview</strong>
-            <el-button text :loading="agentsLoading" @click="loadAgents">Reload</el-button>
-          </div>
-        </template>
-
+        <template #header><strong>Create durable Run</strong></template>
         <el-form label-position="top">
           <el-form-item label="Agent">
             <el-select v-model="selectedAgentId" placeholder="Select an Agent">
@@ -515,47 +394,22 @@ onMounted(async () => {
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="User input">
-            <el-input v-model="previewInput" type="textarea" :rows="4" />
+          <el-form-item label="Input">
+            <el-input v-model="runInput" type="textarea" :rows="5" />
           </el-form-item>
           <el-button
             type="primary"
-            :loading="previewLoading"
-            :disabled="!canRunAgents || !selectedAgentId || !previewInput.trim()"
-            @click="previewAgent"
+            :loading="runtimeLoading"
+            :disabled="!selectedAgentId || !runInput.trim()"
+            @click="createRun"
           >
-            Execute through Harness
+            Create PENDING Run
           </el-button>
         </el-form>
-
-        <el-alert
-          v-if="agentError"
-          :title="agentError"
-          type="error"
-          show-icon
-          :closable="false"
-          class="result-block"
-        />
-
-        <div v-if="previewResult" class="result-block">
-          <div class="result-meta">
-            <el-tag>{{ previewResult.provider }}</el-tag>
-            <el-tag type="info">{{ previewResult.model }}</el-tag>
-            <span>{{ previewResult.usage.total_tokens }} tokens</span>
-            <span>{{ previewResult.duration_ms.toFixed(1) }} ms</span>
-            <span>{{ previewResult.tool_results.length }} tool result(s)</span>
-          </div>
-          <pre>{{ previewResult.content }}</pre>
-        </div>
       </el-card>
 
       <el-card v-if="canReadSkills" shadow="never">
-        <template #header>
-          <div class="card-header">
-            <strong>Skill Registry</strong>
-            <el-button text :loading="skillsLoading" @click="loadSkills">Reload</el-button>
-          </div>
-        </template>
+        <template #header><strong>Available Skills</strong></template>
         <div class="principal-grid">
           <div v-for="skill in skills" :key="skill.id">
             <dt>{{ skill.name }}</dt>
@@ -563,12 +417,6 @@ onMounted(async () => {
               <div class="tag-list">
                 <el-tag>{{ skill.provider_type }}</el-tag>
                 <el-tag type="info">{{ skill.status }}</el-tag>
-                <el-tag
-                  v-if="skill.versions.length"
-                  type="success"
-                >
-                  v{{ skill.versions[skill.versions.length - 1].version }}
-                </el-tag>
               </div>
               <p class="muted">{{ skill.description }}</p>
             </dd>
@@ -576,5 +424,74 @@ onMounted(async () => {
         </div>
       </el-card>
     </section>
+
+    <el-card v-if="currentUser && canReadRuns" class="status-card result-block" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <strong>Durable Runs</strong>
+          <el-button text type="primary" @click="loadRuns">Reload</el-button>
+        </div>
+      </template>
+
+      <el-alert
+        v-if="runtimeError"
+        :title="runtimeError"
+        type="error"
+        :closable="false"
+        class="result-block"
+      />
+
+      <el-empty v-if="runs.length === 0" description="No Runs yet" />
+
+      <div v-for="run in runs" :key="run.id" class="status-item result-block">
+        <div>
+          <div class="tag-list">
+            <el-tag :type="statusType(run.status)">{{ run.status }}</el-tag>
+            <el-tag type="info">attempt {{ run.attempt }}/{{ run.max_attempts }}</el-tag>
+            <el-tag type="info">{{ run.steps.length }} step(s)</el-tag>
+            <el-tag type="info">{{ run.checkpoints.length }} checkpoint(s)</el-tag>
+          </div>
+          <p><strong>{{ run.input }}</strong></p>
+          <p class="muted">
+            Run {{ run.id }} · state version {{ run.state_version }} ·
+            {{ run.tool_calls.length }} persisted tool call(s)
+          </p>
+          <p v-if="run.error_data" class="muted">
+            Error: {{ JSON.stringify(run.error_data) }}
+          </p>
+        </div>
+
+        <div class="tag-list">
+          <el-button
+            v-if="run.status === 'PENDING' && canUpdateRuns"
+            size="small"
+            type="primary"
+            :loading="runtimeLoading"
+            @click="runAction(run, 'start')"
+          >
+            Start
+          </el-button>
+          <el-button
+            v-if="run.status === 'PAUSED' && canUpdateRuns"
+            size="small"
+            type="warning"
+            :loading="runtimeLoading"
+            @click="runAction(run, 'resume')"
+          >
+            Resume
+          </el-button>
+          <el-button
+            v-if="!['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status) && canCancelRuns"
+            size="small"
+            type="danger"
+            plain
+            :loading="runtimeLoading"
+            @click="runAction(run, 'cancel')"
+          >
+            Cancel
+          </el-button>
+        </div>
+      </div>
+    </el-card>
   </main>
 </template>
