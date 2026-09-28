@@ -54,13 +54,19 @@ class WorkspaceStorage:
             raise WorkspaceSymlinkError("Workspace directory cannot be a symlink")
         base.mkdir(mode=0o750, exist_ok=True)
 
-        for name in ("input", "working", "artifacts"):
+        directory_modes = {
+            "input": 0o755,
+            "working": 0o755,
+            "artifacts": 0o750,
+        }
+        for name, mode in directory_modes.items():
             directory = base / name
             if directory.exists() and directory.is_symlink():
                 raise WorkspaceSymlinkError(
                     f"Workspace directory '{name}' cannot be a symlink"
                 )
-            directory.mkdir(mode=0o750, exist_ok=True)
+            directory.mkdir(mode=mode, exist_ok=True)
+            directory.chmod(mode)
         return base
 
     def resolve(
