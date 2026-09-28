@@ -59,8 +59,13 @@ jobs:
         run: npm run build
 
   integration:
-    name: Docker Compose smoke test
+    name: Docker Compose auth/RBAC smoke test
     runs-on: ubuntu-latest
+    env:
+      JWT_SECRET_KEY: ci-only-secret-key-not-for-production
+      BOOTSTRAP_ADMIN_USERNAME: ci-admin
+      BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password-123
+      BOOTSTRAP_ADMIN_EMAIL: ci-admin@example.com
 
     steps:
       - name: Checkout
@@ -76,6 +81,16 @@ jobs:
         run: |
           curl --fail --silent --show-error http://localhost:8000/health
           curl --fail --silent --show-error http://localhost:8000/health/live
+
+      - name: Verify authentication and admin RBAC
+        run: |
+          TOKEN=$(curl --fail --silent --show-error             -H 'Content-Type: application/json'             -d '{"username":"ci-admin","password":"ci-admin-password-123"}'             http://localhost:8000/api/auth/login             | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/auth/me
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/rbac/roles
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/rbac/permissions
 
       - name: Verify frontend
         run: curl --fail --silent --show-error http://localhost:5173/ > /dev/null
