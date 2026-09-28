@@ -128,6 +128,7 @@ class AgentHarness:
                     granted_permissions=set(granted_permissions or set()),
                 )
                 result_payload = result.model_dump(mode="json")
+                result_payload["arguments"] = dict(call.arguments)
                 tool_results.append(result_payload)
                 messages.append(
                     ModelMessage(

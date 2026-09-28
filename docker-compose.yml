@@ -40,7 +40,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-development}
       APP_NAME: enterprise-agent-runtime-platform
-      APP_VERSION: 0.4.0
+      APP_VERSION: 0.5.0
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent}@postgres:5432/${POSTGRES_DB:-agent_runtime}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development-only-change-me}
