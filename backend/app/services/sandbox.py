@@ -452,6 +452,7 @@ sandbox_limits = SandboxLimits(
 sandbox_manager = DockerSandboxManager(
     client=DockerClient(
         base_url=settings.docker_host,
+        version=settings.docker_api_version,
         timeout=max(10, int(settings.sandbox_timeout_seconds) + 10),
     ),
     image=settings.sandbox_image,
