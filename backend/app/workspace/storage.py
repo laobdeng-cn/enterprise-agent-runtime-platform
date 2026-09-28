@@ -81,7 +81,12 @@ class WorkspaceStorage:
         candidate = base.joinpath(*parts)
         self._assert_no_symlink_chain(base, candidate)
 
-        resolved = candidate.resolve(strict=must_exist)
+        try:
+            resolved = candidate.resolve(strict=must_exist)
+        except FileNotFoundError as exc:
+            raise WorkspaceFileNotFoundError(
+                f"Workspace path '{relative_path}' does not exist"
+            ) from exc
         try:
             resolved.relative_to(base)
         except ValueError as exc:
@@ -361,6 +366,10 @@ class WorkspaceStorage:
         current = base
         for part in relative.parts:
             current = current / part
+            if current.is_symlink():
+                raise WorkspaceSymlinkError(
+                    f"Symlink component '{part}' is not allowed"
+                )
             if not current.exists():
                 continue
             info = current.lstat()
