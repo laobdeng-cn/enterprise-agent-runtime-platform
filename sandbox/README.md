@@ -1,34 +1,42 @@
-# Sandbox Runtime
+# Python Sandbox Runtime
 
-This directory will define the isolated code-execution environment used by agents.
+Phase 7 executes Agent-generated Python in short-lived containers managed by a dedicated Docker daemon.
 
-## Intended security model
+## Security boundary
 
-Each execution receives:
+Each execution is created with:
 
-- an ephemeral container;
-- explicit CPU and memory limits;
-- a hard timeout;
-- a dedicated workspace mount only;
-- no Docker socket;
-- no arbitrary host filesystem mounts;
-- default-deny network access, with allow-listing introduced only when required;
-- a read-only base filesystem where practical.
+- `network_mode=none` by default;
+- a read-only container root filesystem;
+- all Linux capabilities dropped;
+- `no-new-privileges`;
+- non-root UID/GID `65534:65534`;
+- CPU, memory and PID limits;
+- a hard wall-clock timeout;
+- bounded `/tmp` tmpfs;
+- Run-owned `input/` and `working/` bind-mounted read-only;
+- one execution-scoped `/workspace/output` bind-mounted read-write;
+- no Docker socket or daemon credentials inside the sandbox.
 
-## First execution backend
+The backend talks to a dedicated Docker-in-Docker daemon over the internal Compose network. The daemon service itself requires privileged mode, but sandbox child containers are created with the restrictions above and never receive control of the daemon.
 
-Phase 7 will implement a **Python sandbox** first. Shell execution is out of scope until the Python path is stable and audited.
+## Filesystem contract
 
-A sandbox result must return a structured envelope containing:
+Sandbox code can read:
 
-```json
-{
-  "status": "success",
-  "exit_code": 0,
-  "stdout": "",
-  "stderr": "",
-  "artifacts": []
-}
+```text
+/workspace/input
+/workspace/working
 ```
 
-The sandbox is an execution boundary. It does not decide business permissions; authorization happens before dispatch.
+Generated files must be written to:
+
+```text
+/workspace/output
+```
+
+Outputs are scanned after execution. Symlinks, unsupported types, oversized files, excessive file counts and workspace-quota violations are rejected before Artifact publication.
+
+## Image policy
+
+The Phase 7 image intentionally contains Python 3.12 and the standard library only. Package installation and outbound network access are not available from the sandbox. Additional analysis libraries should be introduced as explicit, versioned sandbox images rather than installed dynamically by Agent code.
