@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
   integration:
-    name: Docker Compose auth/RBAC smoke test
+    name: Docker Compose Agent Harness smoke test
     runs-on: ubuntu-latest
     env:
       JWT_SECRET_KEY: ci-only-secret-key-not-for-production
@@ -82,15 +82,36 @@ jobs:
           curl --fail --silent --show-error http://localhost:8000/health
           curl --fail --silent --show-error http://localhost:8000/health/live
 
-      - name: Verify authentication and admin RBAC
+      - name: Authenticate bootstrap administrator
         run: |
           TOKEN=$(curl --fail --silent --show-error             -H 'Content-Type: application/json'             -d '{"username":"ci-admin","password":"ci-admin-password-123"}'             http://localhost:8000/api/auth/login             | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+          echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
+      - name: Verify RBAC and Agent version persistence
+        run: |
           curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/auth/me
 
-          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/rbac/roles
+          CREATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{
+              "name":"ci-harness-agent",
+              "description":"CI Agent Harness smoke test",
+              "system_instructions":"You are a deterministic CI test agent.",
+              "model_provider":"deepseek",
+              "model_name":"deepseek-chat",
+              "temperature":0.2
+            }'             http://localhost:8000/api/agents)
 
-          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/rbac/permissions
+          AGENT_ID=$(printf '%s' "$CREATED"             | python -c "import json,sys; print(json.load(sys.stdin)['id'])")
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/agents/"$AGENT_ID"
+
+          UPDATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{
+              "system_instructions":"You are version two of the CI test agent.",
+              "model_provider":"deepseek",
+              "model_name":"deepseek-chat",
+              "temperature":0.1
+            }'             http://localhost:8000/api/agents/"$AGENT_ID"/versions)
+
+          printf '%s' "$UPDATED" | python -c             "import json,sys; data=json.load(sys.stdin); assert len(data['versions']) == 2; assert data['active_version_id'] == data['versions'][1]['id']"
 
       - name: Verify frontend
         run: curl --fail --silent --show-error http://localhost:5173/ > /dev/null
