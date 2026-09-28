@@ -25,6 +25,7 @@ from app.runtime.state_machine import (
 from app.schemas.runtime import RunCreate
 from app.services.agents import AgentHasNoActiveVersionError, get_agent
 from app.services.auth import get_user_by_id, permission_codes
+from app.skills.contracts import SkillExecutionContext
 from app.services.workspaces import create_workspace
 
 
@@ -541,6 +542,10 @@ async def execute_run(
                 user_input=run.input_text,
                 additional_context=list(run.additional_context),
                 granted_permissions=permission_codes(execution_principal),
+                skill_context=SkillExecutionContext(
+                    run_id=run.id,
+                    principal_id=execution_principal.id,
+                ),
             )
         except Exception as exc:
             error = _normalize_error(exc)

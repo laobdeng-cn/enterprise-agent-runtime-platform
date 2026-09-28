@@ -1,6 +1,15 @@
+from dataclasses import dataclass, field
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+
+@dataclass(slots=True)
+class SkillExecutionContext:
+    run_id: UUID | None = None
+    principal_id: UUID | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class SkillErrorEnvelope(BaseModel):

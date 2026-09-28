@@ -20,6 +20,7 @@ from app.agents.harness.hooks import (
 from app.agents.harness.providers.base import ModelProvider
 from app.agents.harness.registry import ModelProviderRegistry
 from app.models.agent import AgentVersion
+from app.skills.contracts import SkillExecutionContext
 from app.skills.executor import SkillExecutor
 
 
@@ -47,6 +48,7 @@ class AgentHarness:
         user_input: str,
         additional_context: list[str] | None = None,
         granted_permissions: set[str] | None = None,
+        skill_context: SkillExecutionContext | None = None,
     ) -> HarnessResult:
         context_package = self.context_builder.build(
             system_instructions=version.system_instructions,
@@ -126,6 +128,7 @@ class AgentHarness:
                     call,
                     bound_versions=list(version.bound_skill_versions),
                     granted_permissions=set(granted_permissions or set()),
+                    execution_context=skill_context,
                 )
                 result_payload = result.model_dump(mode="json")
                 result_payload["arguments"] = dict(call.arguments)

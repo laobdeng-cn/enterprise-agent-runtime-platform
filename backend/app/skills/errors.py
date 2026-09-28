@@ -35,3 +35,7 @@ class SkillRetryableProviderError(SkillProviderError):
 class SkillTimeoutError(SkillError):
     code = "SKILL_TIMEOUT"
     retryable = True
+
+
+class SkillExecutionContextError(SkillError):
+    code = "SKILL_EXECUTION_CONTEXT"

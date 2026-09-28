@@ -2,10 +2,14 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from app.models.skill import SkillVersion
+from app.skills.contracts import SkillExecutionContext
 from app.skills.errors import SkillProviderConfigurationError
 from app.skills.providers.base import SkillProviderAdapter
 
-LocalSkillHandler = Callable[[dict[str, Any]], Awaitable[Any]]
+LocalSkillHandler = Callable[
+    [dict[str, Any], SkillExecutionContext | None],
+    Awaitable[Any],
+]
 
 
 class LocalSkillAdapter(SkillProviderAdapter):
@@ -16,6 +20,7 @@ class LocalSkillAdapter(SkillProviderAdapter):
         self,
         version: SkillVersion,
         arguments: dict[str, Any],
+        context: SkillExecutionContext | None = None,
     ) -> Any:
         handler_name = str(version.provider_config.get("handler") or "")
         handler = self.handlers.get(handler_name)
@@ -23,4 +28,4 @@ class LocalSkillAdapter(SkillProviderAdapter):
             raise SkillProviderConfigurationError(
                 f"Local Skill handler '{handler_name}' is not registered"
             )
-        return await handler(arguments)
+        return await handler(arguments, context)

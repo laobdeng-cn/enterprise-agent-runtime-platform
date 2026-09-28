@@ -2,9 +2,11 @@ from app.agents.harness.providers.deepseek import DeepSeekProvider
 from app.agents.harness.registry import ModelProviderRegistry
 from app.agents.harness.runner import AgentHarness
 from app.core.config import settings
+from app.services.workspaces import workspace_capabilities
 from app.skills.executor import SkillExecutor
 from app.skills.local_handlers import LOCAL_SKILL_HANDLERS
 from app.skills.providers.local import LocalSkillAdapter
+from app.skills.providers.workspace import WorkspaceSkillAdapter
 from app.skills.registry import SkillProviderRegistry
 
 
@@ -13,6 +15,10 @@ def build_skill_executor() -> SkillExecutor:
     skill_providers.register(
         "local",
         LocalSkillAdapter(LOCAL_SKILL_HANDLERS),
+    )
+    skill_providers.register(
+        "workspace",
+        WorkspaceSkillAdapter(workspace_capabilities),
     )
     return SkillExecutor(skill_providers)
 

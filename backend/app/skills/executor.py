@@ -7,7 +7,11 @@ from jsonschema.exceptions import SchemaError, ValidationError
 
 from app.agents.harness.contracts import ModelToolCall
 from app.models.skill import SkillVersion
-from app.skills.contracts import SkillErrorEnvelope, SkillExecutionResult
+from app.skills.contracts import (
+    SkillErrorEnvelope,
+    SkillExecutionContext,
+    SkillExecutionResult,
+)
 from app.skills.errors import (
     SkillError,
     SkillInputValidationError,
@@ -31,6 +35,7 @@ class SkillExecutor:
         *,
         bound_versions: list[SkillVersion],
         granted_permissions: set[str],
+        execution_context: SkillExecutionContext | None = None,
     ) -> SkillExecutionResult:
         started_at = perf_counter()
         by_name = {
@@ -78,7 +83,11 @@ class SkillExecutor:
             try:
                 adapter = self.providers.resolve(version.skill.provider_type)
                 async with asyncio.timeout(version.timeout_seconds):
-                    output = await adapter.execute(version, call.arguments)
+                    output = await adapter.execute(
+                        version,
+                        call.arguments,
+                        execution_context,
+                    )
                 self._validate_output(version.output_schema, output)
                 return SkillExecutionResult(
                     call_id=call.id,
