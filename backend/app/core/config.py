@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     app_name: str = "enterprise-agent-runtime-platform"
-    app_version: str = "0.6.0"
+    app_version: str = "0.7.0"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     workspace_root: str = "/data/workspaces"
     workspace_max_file_bytes: int = 5 * 1024 * 1024
     workspace_quota_bytes: int = 50 * 1024 * 1024
+
+    docker_host: str = "tcp://docker:2375"
+    sandbox_image: str = "enterprise-agent-runtime-sandbox:0.7.0"
+    sandbox_build_context: str = "/sandbox-image"
+    sandbox_cpu_limit: float = 1.0
+    sandbox_memory_limit_mb: int = 512
+    sandbox_timeout_seconds: float = 60.0
+    sandbox_pids_limit: int = 64
+    sandbox_tmpfs_mb: int = 64
+    sandbox_max_output_bytes: int = 256 * 1024
+    sandbox_max_artifacts: int = 20
+    sandbox_max_code_bytes: int = 100 * 1024
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
