@@ -98,6 +98,7 @@ class AgentHarness:
                     duration_ms=(perf_counter() - started_at) * 1000,
                     tool_results=tool_results,
                     metadata={
+                        "response_id": response.response_id,
                         "response_ids": response_ids,
                         "tool_rounds": tool_round,
                     },
