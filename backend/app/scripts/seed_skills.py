@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import async_session_maker, engine
@@ -93,10 +93,12 @@ async def seed() -> None:
                 skill.status = "active"
 
             if skill.active_version_id is None:
-                next_version = (
-                    max((version.version for version in skill.versions), default=0)
-                    + 1
+                version_result = await session.execute(
+                    select(func.max(SkillVersion.version)).where(
+                        SkillVersion.skill_id == skill.id
+                    )
                 )
+                next_version = (version_result.scalar_one_or_none() or 0) + 1
                 version = SkillVersion(
                     skill_id=skill.id,
                     version=next_version,
