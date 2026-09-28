@@ -116,7 +116,8 @@ jobs:
 
       - name: Create durable Run and Workspace
         run: |
-          CREATED_RUN=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "{"agent_id":"$AGENT_ID","input":"Prepare a report in the workspace.","additional_context":[],"max_attempts":2}"             http://localhost:8000/api/runs)
+          RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["AGENT_ID"],"input":"Prepare a report in the workspace.","additional_context":[],"max_attempts":2}))')
+          CREATED_RUN=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$RUN_PAYLOAD" http://localhost:8000/api/runs)
 
           RUN_ID=$(printf '%s' "$CREATED_RUN" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['status']=='PENDING'; print(d['id'])")
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
