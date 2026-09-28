@@ -10,6 +10,7 @@ from app.models.skill import Skill, SkillVersion
 SAFE_SKILLS: dict[str, dict[str, Any]] = {
     "system_echo": {
         "description": "Return the provided text as a structured value.",
+        "provider_type": "local",
         "input_schema": {
             "type": "object",
             "properties": {"text": {"type": "string"}},
@@ -22,10 +23,13 @@ SAFE_SKILLS: dict[str, dict[str, Any]] = {
             "required": ["text"],
             "additionalProperties": False,
         },
+        "required_permissions": ["skill:execute"],
+        "side_effect": "READ_ONLY",
         "provider_config": {"handler": "system_echo"},
     },
     "math_add": {
         "description": "Add two numeric values.",
+        "provider_type": "local",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -41,10 +45,13 @@ SAFE_SKILLS: dict[str, dict[str, Any]] = {
             "required": ["result"],
             "additionalProperties": False,
         },
+        "required_permissions": ["skill:execute"],
+        "side_effect": "READ_ONLY",
         "provider_config": {"handler": "math_add"},
     },
     "text_stats": {
         "description": "Calculate character, word, and line counts for text.",
+        "provider_type": "local",
         "input_schema": {
             "type": "object",
             "properties": {"text": {"type": "string"}},
@@ -61,7 +68,143 @@ SAFE_SKILLS: dict[str, dict[str, Any]] = {
             "required": ["characters", "words", "lines"],
             "additionalProperties": False,
         },
+        "required_permissions": ["skill:execute"],
+        "side_effect": "READ_ONLY",
         "provider_config": {"handler": "text_stats"},
+    },
+    "workspace_list": {
+        "description": (
+            "List files and directories inside this Run's input, working, "
+            "or artifacts workspace directories."
+        ),
+        "provider_type": "workspace",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "minLength": 1}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "name": {"type": "string"},
+                            "type": {
+                                "type": "string",
+                                "enum": ["file", "directory"],
+                            },
+                            "size_bytes": {"type": "integer"},
+                        },
+                        "required": ["path", "name", "type", "size_bytes"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["entries"],
+            "additionalProperties": False,
+        },
+        "required_permissions": ["skill:execute", "workspace:read"],
+        "side_effect": "READ_ONLY",
+        "provider_config": {"action": "list"},
+    },
+    "workspace_read_text": {
+        "description": (
+            "Read a UTF-8 text file from this Run's workspace. "
+            "Paths are relative, for example input/task.md or working/result.md."
+        ),
+        "provider_type": "workspace",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "minLength": 1}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        "required_permissions": ["skill:execute", "workspace:read"],
+        "side_effect": "READ_ONLY",
+        "provider_config": {"action": "read_text"},
+    },
+    "workspace_write_text": {
+        "description": (
+            "Write a UTF-8 text file inside this Run's working directory. "
+            "The path must begin with working/."
+        ),
+        "provider_type": "workspace",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "size_bytes": {"type": "integer"},
+                "sha256": {"type": "string"},
+            },
+            "required": ["path", "size_bytes", "sha256"],
+            "additionalProperties": False,
+        },
+        "required_permissions": ["skill:execute", "workspace:write"],
+        "side_effect": "REVERSIBLE_WRITE",
+        "provider_config": {"action": "write_text"},
+    },
+    "artifact_publish": {
+        "description": (
+            "Publish a file from working/ as an immutable Run artifact "
+            "with metadata and a downloadable artifact identity."
+        ),
+        "provider_type": "workspace",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source_path": {"type": "string", "minLength": 1},
+                "display_name": {"type": "string", "minLength": 1},
+                "kind": {"type": "string", "minLength": 1},
+            },
+            "required": ["source_path"],
+            "additionalProperties": False,
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {"type": "string"},
+                "path": {"type": "string"},
+                "display_name": {"type": "string"},
+                "media_type": {"type": "string"},
+                "size_bytes": {"type": "integer"},
+                "sha256": {"type": "string"},
+            },
+            "required": [
+                "artifact_id",
+                "path",
+                "display_name",
+                "media_type",
+                "size_bytes",
+                "sha256",
+            ],
+            "additionalProperties": False,
+        },
+        "required_permissions": ["skill:execute", "artifact:create"],
+        "side_effect": "REVERSIBLE_WRITE",
+        "provider_config": {"action": "publish_artifact"},
     },
 }
 
@@ -78,18 +221,19 @@ async def seed() -> None:
 
         for name, definition in SAFE_SKILLS.items():
             skill = existing.get(name)
+            provider_type = str(definition["provider_type"])
             if skill is None:
                 skill = Skill(
                     name=name,
                     description=str(definition["description"]),
-                    provider_type="local",
+                    provider_type=provider_type,
                     status="active",
                 )
                 session.add(skill)
                 await session.flush()
             else:
                 skill.description = str(definition["description"])
-                skill.provider_type = "local"
+                skill.provider_type = provider_type
                 skill.status = "active"
 
             if skill.active_version_id is None:
@@ -104,8 +248,10 @@ async def seed() -> None:
                     version=next_version,
                     input_schema=dict(definition["input_schema"]),
                     output_schema=dict(definition["output_schema"]),
-                    required_permissions=["skill:execute"],
-                    side_effect="READ_ONLY",
+                    required_permissions=list(
+                        definition["required_permissions"]
+                    ),
+                    side_effect=str(definition["side_effect"]),
                     timeout_seconds=5,
                     max_attempts=1,
                     provider_config=dict(definition["provider_config"]),
