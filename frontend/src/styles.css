@@ -56,7 +56,7 @@ h1 {
 }
 
 .subtitle {
-  max-width: 760px;
+  max-width: 780px;
   margin: 20px 0 0;
   color: #606266;
   font-size: 18px;
@@ -90,14 +90,20 @@ h1 {
   border-radius: 10px;
 }
 
-.auth-grid {
+.auth-grid,
+.agent-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
 }
 
-.auth-alert {
-  margin-bottom: 16px;
+.agent-grid {
+  margin-top: 24px;
+}
+
+.auth-alert,
+.result-block {
+  margin-top: 16px;
 }
 
 .principal-grid {
@@ -122,25 +128,45 @@ h1 {
   margin: 0;
 }
 
-.tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
+.tag-list,
+.result-meta,
 .flow {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
+}
+
+.flow {
+  gap: 10px;
   color: #303133;
   font-weight: 600;
+}
+
+.result-meta {
+  margin-bottom: 12px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.result-block pre {
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.65;
+  background: #f5f7fa;
+  border-radius: 8px;
 }
 
 .muted {
   margin: 18px 0 0;
   color: #606266;
   line-height: 1.7;
+}
+
+.el-select {
+  width: 100%;
 }
 
 @media (max-width: 800px) {
@@ -154,7 +180,8 @@ h1 {
   }
 
   .status-grid,
-  .auth-grid {
+  .auth-grid,
+  .agent-grid {
     grid-template-columns: 1fr;
   }
 }
