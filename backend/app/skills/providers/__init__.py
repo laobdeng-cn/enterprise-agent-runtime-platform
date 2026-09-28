@@ -2,10 +2,12 @@
 
 from app.skills.providers.base import SkillProviderAdapter
 from app.skills.providers.local import LocalSkillAdapter
+from app.skills.providers.sandbox import SandboxSkillAdapter
 from app.skills.providers.workspace import WorkspaceSkillAdapter
 
 __all__ = [
     "LocalSkillAdapter",
+    "SandboxSkillAdapter",
     "SkillProviderAdapter",
     "WorkspaceSkillAdapter",
 ]
