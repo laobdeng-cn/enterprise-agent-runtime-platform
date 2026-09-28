@@ -1,33 +1,49 @@
 # Backend
 
-This directory will contain the Python/FastAPI control plane and agent runtime implementation.
+FastAPI control plane and runtime backend for Enterprise Agent Runtime Platform.
 
-## Planned boundaries
+## Phase 1 contents
 
-```text
-backend/
-├── app/
-│   ├── api/               # HTTP/SSE transport only
-│   ├── core/              # configuration, security, shared primitives
-│   ├── models/            # persistence models
-│   ├── schemas/           # API/domain validation schemas
-│   ├── services/          # application services
-│   ├── agents/
-│   │   └── harness/       # model/context/tool lifecycle
-│   ├── runtime/           # durable Run/Step execution
-│   ├── skills/            # registry and execution adapters
-│   ├── memory/            # memory retrieval/persistence
-│   ├── mcp/               # MCP clients and registry
-│   ├── sandbox/           # sandbox orchestration client
-│   ├── workflows/         # graph/DAG orchestration
-│   ├── observability/     # traces and metrics
-│   └── eval/              # evaluation/regression
-├── alembic/
-└── tests/
+- Python 3.12 project metadata
+- FastAPI application
+- dependency-aware `/health`
+- independent `/health/live`
+- Pydantic Settings
+- async SQLAlchemy engine
+- PostgreSQL connectivity
+- Redis connectivity
+- Alembic baseline
+- pytest baseline
+- Ruff and mypy configuration
+
+## Local development
+
+From `backend/`:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+alembic upgrade head
+uvicorn app.main:app --reload
 ```
 
-## Architectural rule
+On Windows PowerShell, activate with:
 
-HTTP handlers must not contain agent orchestration logic. API code delegates to application/runtime services. The LLM provider is accessed through an internal adapter rather than directly from business modules.
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
-Implementation begins in **Phase 1**.
+The default local configuration expects PostgreSQL on `localhost:5432` and Redis on `localhost:6379`. The recommended project workflow is Docker Compose from the repository root.
+
+## Tests and lint
+
+```bash
+pytest
+ruff check app tests
+mypy app
+```
+
+## Boundary rule
+
+HTTP handlers must not contain Agent orchestration logic. API code delegates to application/runtime services. Model providers are accessed through an internal adapter introduced in Phase 3.
