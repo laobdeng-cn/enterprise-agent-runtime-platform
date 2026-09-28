@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     app_name: str = "enterprise-agent-runtime-platform"
-    app_version: str = "0.5.0"
+    app_version: str = "0.6.0"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     deepseek_timeout_seconds: float = 60.0
+
+    workspace_root: str = "/data/workspaces"
+    workspace_max_file_bytes: int = 5 * 1024 * 1024
+    workspace_quota_bytes: int = 50 * 1024 * 1024
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
