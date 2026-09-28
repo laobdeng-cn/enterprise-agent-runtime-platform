@@ -175,6 +175,75 @@ jobs:
           curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -o /tmp/phase6-report-after-restart.md             http://localhost:8000/api/runs/"$RUN_ID"/artifacts/"$ARTIFACT_ID"/download
           cmp /tmp/phase6-report.md /tmp/phase6-report-after-restart.md
 
+      - name: Verify Sandbox daemon health
+        run: |
+          SANDBOX_HEALTH=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/sandbox/health)
+          printf '%s' "$SANDBOX_HEALTH" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['available'] is True; assert d['security']['network_mode']=='none'; assert d['security']['read_only'] is True; assert d['security']['user']=='65534:65534'"
+
+      - name: Create Sandbox Run
+        run: |
+          RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["AGENT_ID"],"input":"Analyze input data in the isolated sandbox.","additional_context":[],"max_attempts":2}))')
+          CREATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$RUN_PAYLOAD"             http://localhost:8000/api/runs)
+          SANDBOX_RUN_ID=$(printf '%s' "$CREATED" | python -c "import json,sys; print(json.load(sys.stdin)['id'])")
+          echo "SANDBOX_RUN_ID=$SANDBOX_RUN_ID" >> "$GITHUB_ENV"
+
+          curl --fail --silent --show-error             -X PUT             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"path":"input/data.txt","content":"phase seven sandbox"}'             http://localhost:8000/api/runs/"$SANDBOX_RUN_ID"/workspace/text > /dev/null
+
+      - name: Execute isolated Python and publish Artifact
+        run: |
+          SANDBOX_PAYLOAD=$(python - <<'PY'
+          import json
+          code = """from pathlib import Path
+          text = Path("/workspace/input/data.txt").read_text()
+          Path("/workspace/output/result.txt").write_text(text.upper())
+          print("sandbox-ok")
+          """
+          print(json.dumps({"code": code, "publish_artifacts": True}))
+          PY
+          )
+
+          RESULT=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$SANDBOX_PAYLOAD"             http://localhost:8000/api/runs/"$SANDBOX_RUN_ID"/sandbox/python)
+
+          SANDBOX_ARTIFACT_ID=$(printf '%s' "$RESULT" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['status']=='SUCCEEDED'; assert d['exit_code']==0; assert d['timed_out'] is False; assert 'sandbox-ok' in d['stdout']; assert len(d['artifacts'])==1; print(d['artifacts'][0]['artifact_id'])")
+          echo "SANDBOX_ARTIFACT_ID=$SANDBOX_ARTIFACT_ID" >> "$GITHUB_ENV"
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -o /tmp/sandbox-result.txt             http://localhost:8000/api/runs/"$SANDBOX_RUN_ID"/artifacts/"$SANDBOX_ARTIFACT_ID"/download
+          test "$(cat /tmp/sandbox-result.txt)" = "PHASE SEVEN SANDBOX"
+
+      - name: Verify Sandbox network denial
+        run: |
+          NETWORK_PAYLOAD=$(python - <<'PY'
+          import json
+          code = """import socket
+          socket.create_connection(("1.1.1.1", 80), timeout=0.5)
+          """
+          print(json.dumps({"code": code, "publish_artifacts": False}))
+          PY
+          )
+
+          RESULT=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$NETWORK_PAYLOAD"             http://localhost:8000/api/runs/"$SANDBOX_RUN_ID"/sandbox/python)
+
+          printf '%s' "$RESULT" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['status']=='FAILED'; assert d['exit_code'] != 0; assert d['timed_out'] is False"
+
+      - name: Verify Sandbox hard timeout
+        run: |
+          TIMEOUT_PAYLOAD=$(python - <<'PY'
+          import json
+          print(json.dumps({"code":"import time\ntime.sleep(5)","publish_artifacts":False}))
+          PY
+          )
+
+          RESULT=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$TIMEOUT_PAYLOAD"             http://localhost:8000/api/runs/"$SANDBOX_RUN_ID"/sandbox/python)
+
+          printf '%s' "$RESULT" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['status']=='TIMED_OUT'; assert d['timed_out'] is True"
+
+      - name: Verify Sandbox persistence and cleanup
+        run: |
+          RUN=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$SANDBOX_RUN_ID")
+          printf '%s' "$RUN" | python -c             "import json,sys; d=json.load(sys.stdin); steps=[s for s in d['steps'] if s['step_type']=='SANDBOX_EXECUTION']; assert len(steps)==3; assert steps[0]['status']=='COMPLETED'; assert steps[1]['status']=='FAILED'; assert steps[2]['status']=='FAILED'"
+
+          docker compose exec -T docker sh -c             'test -z "$(docker ps -aq --filter label=earp.sandbox=true)"'
+
       - name: Verify durable execution failure semantics
         run: |
           STARTED=$(curl --fail --silent --show-error             -X POST             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$RUN_ID"/start)
