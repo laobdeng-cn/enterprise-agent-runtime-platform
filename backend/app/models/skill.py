@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     JSON,
+    Column,
     DateTime,
     ForeignKey,
     Integer,
@@ -12,12 +13,14 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
-    Column,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.agent import AgentVersion
 
 agent_version_skills = Table(
     "agent_version_skills",
