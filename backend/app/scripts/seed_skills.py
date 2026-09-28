@@ -206,8 +206,98 @@ SAFE_SKILLS: dict[str, dict[str, Any]] = {
         "side_effect": "REVERSIBLE_WRITE",
         "provider_config": {"action": "publish_artifact"},
     },
-}
-
+,
+    "python_execute": {
+        "description": (
+            "Execute Python 3.12 inside the current Run's isolated Docker sandbox. "
+            "Read inputs from /workspace/input or /workspace/working and write "
+            "generated files only to /workspace/output."
+        ),
+        "provider_type": "sandbox",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100000,
+                },
+                "publish_artifacts": {"type": "boolean"},
+            },
+            "required": ["code"],
+            "additionalProperties": False,
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "execution_id": {"type": "string"},
+                "run_id": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "enum": ["SUCCEEDED", "FAILED", "TIMED_OUT"],
+                },
+                "exit_code": {
+                    "anyOf": [
+                        {"type": "integer"},
+                        {"type": "null"},
+                    ]
+                },
+                "stdout": {"type": "string"},
+                "stderr": {"type": "string"},
+                "duration_ms": {"type": "number"},
+                "timed_out": {"type": "boolean"},
+                "stdout_truncated": {"type": "boolean"},
+                "stderr_truncated": {"type": "boolean"},
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "artifact_id": {"type": "string"},
+                            "path": {"type": "string"},
+                            "display_name": {"type": "string"},
+                            "media_type": {"type": "string"},
+                            "size_bytes": {"type": "integer"},
+                            "sha256": {"type": "string"},
+                        },
+                        "required": [
+                            "artifact_id",
+                            "path",
+                            "display_name",
+                            "media_type",
+                            "size_bytes",
+                            "sha256",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": [
+                "execution_id",
+                "run_id",
+                "status",
+                "exit_code",
+                "stdout",
+                "stderr",
+                "duration_ms",
+                "timed_out",
+                "stdout_truncated",
+                "stderr_truncated",
+                "artifacts",
+            ],
+            "additionalProperties": False,
+        },
+        "required_permissions": [
+            "skill:execute",
+            "sandbox:execute",
+            "workspace:read",
+            "artifact:create",
+        ],
+        "side_effect": "REVERSIBLE_WRITE",
+        "timeout_seconds": 75,
+        "max_attempts": 1,
+        "provider_config": {"action": "python_execute"},
+    },
 
 async def seed() -> None:
     async with async_session_maker() as session:
@@ -252,8 +342,8 @@ async def seed() -> None:
                         definition["required_permissions"]
                     ),
                     side_effect=str(definition["side_effect"]),
-                    timeout_seconds=5,
-                    max_attempts=1,
+                    timeout_seconds=int(definition.get("timeout_seconds", 5)),
+                    max_attempts=int(definition.get("max_attempts", 1)),
                     provider_config=dict(definition["provider_config"]),
                 )
                 session.add(version)
