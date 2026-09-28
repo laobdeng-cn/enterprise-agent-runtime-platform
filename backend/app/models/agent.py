@@ -123,3 +123,9 @@ class AgentVersion(Base):
         back_populates="versions",
         foreign_keys=[agent_id],
     )
+    bound_skill_versions: Mapped[list["SkillVersion"]] = relationship(
+        "SkillVersion",
+        secondary="agent_version_skills",
+        back_populates="agent_versions",
+        lazy="selectin",
+    )
