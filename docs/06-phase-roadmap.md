@@ -142,15 +142,22 @@ Implement:
 
 ## Phase 8 — Memory
 
-Implement:
+**Status: implemented.**
 
-- conversation memory;
-- task memory;
-- long-term memory;
-- semantic retrieval;
-- memory scoping and deletion/expiration policy.
+Implemented:
 
-**Exit criteria:** relevant durable memory can be retrieved for a later Run without blindly replaying all history.
+- Conversation / Task / Long-term / Semantic Memory types;
+- USER / AGENT / RUN scopes;
+- TTL, soft deletion, importance, source and metadata;
+- fingerprint deduplication;
+- deterministic English/CJK relevance retrieval;
+- MemoryRetriever / MemoryWriter boundaries;
+- `memory_search` / `memory_write` Skills;
+- Runtime retrieval before model invocation;
+- safe untrusted Memory context injection;
+- Memory Inspector.
+
+**Exit criteria:** relevant durable Memory is retrieved for a later Run without blindly replaying all history, and retained content cannot override system/RBAC/tool policy.
 
 ---
 
