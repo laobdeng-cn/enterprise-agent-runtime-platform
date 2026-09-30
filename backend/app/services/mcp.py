@@ -114,6 +114,17 @@ async def create_mcp_server(
     return await get_mcp_server(session, server.id)
 
 
+def _invalidate_discovered_tools(
+    server: MCPServer,
+    *,
+    status: str,
+) -> None:
+    for tool in server.tools:
+        tool.status = status
+        if tool.skill is not None and tool.skill.provider_type == "mcp":
+            tool.skill.status = "disabled"
+
+
 async def update_mcp_server(
     session: AsyncSession,
     server_id: UUID,
@@ -137,9 +148,37 @@ async def update_mcp_server(
         next_secret_ref = None
         values["secret_ref"] = None
 
+    discovery_sensitive_fields = {
+        "url",
+        "trust_level",
+        "auth_mode",
+        "secret_ref",
+        "config",
+    }
+    requires_rediscovery = bool(
+        discovery_sensitive_fields.intersection(values)
+    )
+
     for key, value in values.items():
         if value is not None or key == "secret_ref":
             setattr(server, key, value)
+
+    if server.status == "disabled":
+        _invalidate_discovered_tools(
+            server,
+            status="disabled",
+        )
+    elif requires_rediscovery:
+        # A changed endpoint or platform mapping must never inherit the
+        # previous server's executable tool contracts. Reactivation requires
+        # a fresh discovery against the updated connector definition.
+        _invalidate_discovered_tools(
+            server,
+            status="stale",
+        )
+        server.last_health_status = None
+        server.last_health_error = None
+        server.last_discovered_at = None
 
     await session.commit()
     return await get_mcp_server(session, server.id)
