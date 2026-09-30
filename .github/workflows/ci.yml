@@ -173,7 +173,7 @@ jobs:
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
             -d '{
-              "name":"ci-mcp-agent",
+              "name":"ci-mcp-agent-single",
               "description":"CI MCP context selection test",
               "system_instructions":"Use approved enterprise connectors when relevant.",
               "model_provider":"deepseek",
