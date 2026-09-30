@@ -2,28 +2,27 @@
 
 Vue 3 + TypeScript engineering console for Enterprise Agent Runtime Platform.
 
-## Current Phase 9 contents
+## Current Phase 10 contents
 
 - infrastructure health
 - authentication/current principal
-- Agent selection
-- Skill registry overview
+- Agent and Skill overview
 - durable Run lifecycle controls
 - Workspace Inspector
 - Artifact metadata
 - Python Sandbox Console
 - Memory Inspector
 - Context Inspector
-- Context preview for PENDING Runs
-- persisted Context-plan inspection after execution
-- input/used/remaining token-budget display
-- runtime-reserve display
-- selected Skill display
-- per-component included/compressed/excluded state
-- relevance score display
-- token usage per Context component
-- inclusion/exclusion reason and content preview
+- MCP Server Registry
+- MCP server health status
+- transport and trust-level display
+- discovered remote-tool inventory
+- synchronized Skill-name display
+- domain permission display
+- side-effect classification display
+- health-check action
+- governed rediscovery action for `mcp:manage` principals
 
-The Context Inspector is an engineering/operator surface. It exposes the platform's Context decisions without changing the model execution path.
+The MCP Registry is an operator surface. It exposes connector state and discovered capability policy without allowing the remote MCP server to define platform authorization.
 
 Manual end-to-end validation remains deferred until all planned phases are complete.
