@@ -2,12 +2,14 @@ from app.agents.harness.providers.deepseek import DeepSeekProvider
 from app.agents.harness.registry import ModelProviderRegistry
 from app.agents.harness.runner import AgentHarness
 from app.core.config import settings
+from app.services.mcp import mcp_execution_service
 from app.services.memory import memory_capabilities
 from app.services.sandbox import sandbox_execution_service
 from app.services.workspaces import workspace_capabilities
 from app.skills.executor import SkillExecutor
 from app.skills.local_handlers import LOCAL_SKILL_HANDLERS
 from app.skills.providers.local import LocalSkillAdapter
+from app.skills.providers.mcp import MCPSkillAdapter
 from app.skills.providers.memory import MemorySkillAdapter
 from app.skills.providers.sandbox import SandboxSkillAdapter
 from app.skills.providers.workspace import WorkspaceSkillAdapter
@@ -31,6 +33,10 @@ def build_skill_executor() -> SkillExecutor:
     skill_providers.register(
         "memory",
         MemorySkillAdapter(memory_capabilities),
+    )
+    skill_providers.register(
+        "mcp",
+        MCPSkillAdapter(mcp_execution_service),
     )
     return SkillExecutor(skill_providers)
 

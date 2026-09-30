@@ -12,7 +12,7 @@ from app.skills.providers.base import SkillProviderAdapter
 
 
 class MCPExecutionPort(Protocol):
-    async def call(
+    async def execute(
         self,
         *,
         server_id: UUID,
@@ -53,12 +53,10 @@ class MCPSkillAdapter(SkillProviderAdapter):
             ) from exc
 
         try:
-            return await self.execution.call(
+            return await self.execution.execute(
                 server_id=server_id,
                 tool_name=str(tool_raw),
                 arguments=arguments,
-                principal_id=context.principal_id,
-                run_id=context.run_id,
             )
-        except (LookupError, PermissionError, ValueError) as exc:
+        except (LookupError, PermissionError, ValueError, RuntimeError) as exc:
             raise SkillProviderError(str(exc)) from exc
