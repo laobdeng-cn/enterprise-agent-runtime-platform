@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     app_name: str = "enterprise-agent-runtime-platform"
-    app_version: str = "0.7.0"
+    app_version: str = "0.8.0"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     sandbox_max_output_bytes: int = 256 * 1024
     sandbox_max_artifacts: int = 20
     sandbox_max_code_bytes: int = 100 * 1024
+
+    memory_context_limit: int = 8
+    memory_search_candidate_limit: int = 200
+    memory_search_min_score: float = 0.12
+    memory_default_ttl_days: int = 0
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
