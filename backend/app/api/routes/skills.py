@@ -175,6 +175,7 @@ async def skills_execute(
             skill_id,
             arguments=payload.arguments,
             granted_permissions=permission_codes(principal),
+            principal_id=principal.id,
         )
     except (SkillNotFoundError, SkillVersionNotFoundError) as exc:
         raise HTTPException(

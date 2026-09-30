@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.agents.harness.contracts import ModelToolCall
 from app.models.skill import Skill, SkillVersion
 from app.schemas.skill import SkillCreate, SkillVersionCreate
-from app.skills.contracts import SkillExecutionResult
+from app.skills.contracts import SkillExecutionContext, SkillExecutionResult
 from app.skills.executor import SkillExecutor
 
 
@@ -221,6 +221,7 @@ async def execute_active_skill(
     *,
     arguments: dict[str, Any],
     granted_permissions: set[str],
+    principal_id: UUID,
 ) -> SkillExecutionResult:
     skill = await get_skill(session, skill_id)
     version = skill.active_version
@@ -237,4 +238,7 @@ async def execute_active_skill(
         ),
         bound_versions=[version],
         granted_permissions=granted_permissions,
+        execution_context=SkillExecutionContext(
+            principal_id=principal_id,
+        ),
     )

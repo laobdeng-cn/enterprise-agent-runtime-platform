@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     app_name: str = "enterprise-agent-runtime-platform"
-    app_version: str = "0.9.0"
+    app_version: str = "0.10.0"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     context_skill_limit: int = 8
     context_item_max_tokens: int = 2048
     context_fallback_skill_count: int = 3
+
+    mcp_knowledge_url: str = "http://knowledge-mcp:8101/mcp"
+    mcp_experiment_url: str = "http://experiment-mcp:8102/mcp"
+    mcp_enterprise_url: str = "http://enterprise-mcp:8103/mcp"
+    mcp_timeout_seconds: float = 20.0
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
