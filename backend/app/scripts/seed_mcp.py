@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Any
 
 from sqlalchemy import select
 
@@ -10,7 +11,7 @@ from app.services.mcp import discover_mcp_server
 
 logger = logging.getLogger(__name__)
 
-FIRST_PARTY_SERVERS = [
+FIRST_PARTY_SERVERS: list[dict[str, Any]] = [
     {
         "name": "knowledge",
         "description": "Approved internal knowledge search and document access.",
