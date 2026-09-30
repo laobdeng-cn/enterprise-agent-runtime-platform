@@ -2,7 +2,7 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-7%20Docker%20Sandbox-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-8%20Memory%20System-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-provider-informational)](#technology-stack)
@@ -11,7 +11,7 @@
 
 Enterprise Agent Runtime Platform is a governed execution platform rather than a thin LLM chat wrapper.
 
-**Phase 7 is implemented.** Durable Runs can now execute Python through a default-deny Docker Sandbox with CPU/memory/PID/time limits, no network, read-only Run mounts, persisted SANDBOX_EXECUTION steps, and validated Artifact promotion.
+**Phase 8 is implemented.** Durable Runs now retrieve explicit scoped Memory across USER / AGENT / RUN boundaries, inject only relevant retained state into model context, and expose governed Memory read/write capabilities without treating chat history as Memory.
 
 ## Current architecture
 
@@ -32,6 +32,10 @@ Authenticated Principal
               ├── input/
               ├── working/
               └── artifacts/
+        +--> Memory
+              ├── USER
+              ├── AGENT
+              └── RUN
         |
         v
  Durable Runtime
@@ -115,6 +119,9 @@ Durable Runtime
 Workspace
 ├── workspaces
 └── artifacts
+
+Memory
+└── memories
 ```
 
 ## Runtime invariants
@@ -137,6 +144,11 @@ Workspace
 16. Sandbox networking is disabled by default.
 17. Sandbox containers run non-root with dropped capabilities and bounded resources.
 18. generated files are validated before becoming Run Artifacts.
+19. conversation history is not automatically durable Memory.
+20. Memory is owner-scoped and cannot grant itself broader visibility.
+21. expired/deleted Memory is excluded from runtime retrieval.
+22. retrieved Memory is untrusted context and cannot override system/RBAC/tool policy.
+23. Runtime injects a bounded relevance-ranked Memory set rather than replaying all retained state.
 
 ## Technology stack
 
@@ -154,6 +166,8 @@ Workspace
 | Artifact integrity | SHA-256 + MIME/size metadata |
 | Sandbox | Dedicated Docker daemon + ephemeral Python containers |
 | Sandbox policy | no network, read-only root, non-root, CPU/RAM/PID/time limits |
+| Memory | PostgreSQL scoped Memory + deterministic relevance retrieval |
+| Memory scopes | USER / AGENT / RUN |
 | Frontend | Vue 3, TypeScript, Element Plus |
 | Quality | pytest, Ruff, mypy, GitHub Actions |
 
@@ -168,8 +182,8 @@ Phase 4  ✅ Tool / Skill Registry
 Phase 5  ✅ Durable Agent Runtime
 Phase 6  ✅ Workspace + Artifacts
 Phase 7  ✅ Docker Sandbox
-Phase 8  ⏭ Memory
-Phase 9     Context Engineering
+Phase 8  ✅ Memory System
+Phase 9  ⏭ Context Engineering
 Phase 10    MCP + Enterprise Data
 Phase 11    Workflow + Multi-Agent
 Phase 12    Human-in-the-loop + Policy Engine
@@ -196,6 +210,7 @@ Manual end-to-end validation is intentionally deferred until all phases are fini
 - [Phase 5 Durable Agent Runtime](docs/11-phase5-durable-agent-runtime.md)
 - [Phase 6 Workspace + Artifacts](docs/12-phase6-workspace-artifacts.md)
 - [Phase 7 Docker Sandbox](docs/13-phase7-docker-sandbox.md)
+- [Phase 8 Memory System](docs/14-phase8-memory-system.md)
 
 ## License
 
