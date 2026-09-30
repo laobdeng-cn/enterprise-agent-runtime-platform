@@ -250,6 +250,7 @@ jobs:
 
           USER_MEMORY_ID=$(printf '%s' "$USER_MEMORY" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['memory_type']=='LONG_TERM'; assert d['scope']=='USER'; assert d['status']=='ACTIVE'; print(d['id'])")
           echo "USER_MEMORY_ID=$USER_MEMORY_ID" >> "$GITHUB_ENV"
+          export USER_MEMORY_ID
 
           AGENT_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"memory_type":"SEMANTIC","scope":"AGENT","agent_id":os.environ["AGENT_ID"],"content":"This Agent should use concise report structure for analysis tasks.","importance":0.9}))')
           AGENT_MEMORY=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$AGENT_PAYLOAD"             http://localhost:8000/api/memories)
@@ -261,6 +262,7 @@ jobs:
 
           RUN_MEMORY_ID=$(printf '%s' "$RUN_MEMORY" | python -c             "import json,sys,os; d=json.load(sys.stdin); assert d['scope']=='RUN'; assert d['run_id']==os.environ['RUN_ID']; print(d['id'])")
           echo "RUN_MEMORY_ID=$RUN_MEMORY_ID" >> "$GITHUB_ENV"
+          export RUN_MEMORY_ID
 
           SEARCH=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             "http://localhost:8000/api/memories/search?q=prepare%20report&run_id=$RUN_ID&limit=10")
 
