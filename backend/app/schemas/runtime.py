@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.agents.harness.contracts import ContextTrace
+
 
 class RunCreate(BaseModel):
     agent_id: UUID
@@ -79,3 +81,10 @@ class RunResponse(BaseModel):
     steps: list[RunStepResponse] = Field(default_factory=list)
     tool_calls: list[ToolCallResponse] = Field(default_factory=list)
     checkpoints: list[RunCheckpointResponse] = Field(default_factory=list)
+
+
+class ContextInspectionResponse(BaseModel):
+    run_id: UUID
+    agent_version_id: UUID
+    source: str
+    trace: ContextTrace
