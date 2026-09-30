@@ -14,6 +14,7 @@ from app.models.identity import User
 from app.models.runtime import AgentRun
 from app.runtime.state_machine import InvalidRunTransitionError, is_terminal
 from app.schemas.runtime import (
+    ContextInspectionResponse,
     RunCheckpointResponse,
     RunCreate,
     RunResponse,
@@ -29,6 +30,7 @@ from app.services.runtime import (
     create_run,
     execute_run,
     get_run,
+    inspect_run_context,
     list_events_since,
     list_runs,
     pause_run,
@@ -156,6 +158,38 @@ async def runs_create(
     except Exception as exc:
         raise _http_error(exc) from exc
     return to_run_response(run)
+
+
+@router.get(
+    "/{run_id}/context",
+    response_model=ContextInspectionResponse,
+)
+async def run_context_inspector(
+    run_id: UUID,
+    principal: RunReader,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ContextInspectionResponse:
+    try:
+        run = await get_run(
+            session,
+            run_id,
+            principal=principal,
+        )
+        source, trace = await inspect_run_context(
+            session,
+            agent_harness,
+            run_id,
+            principal=principal,
+        )
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+    return ContextInspectionResponse(
+        run_id=run.id,
+        agent_version_id=run.agent_version_id,
+        source=source,
+        trace=trace,
+    )
 
 
 @router.get("/{run_id}", response_model=RunResponse)
