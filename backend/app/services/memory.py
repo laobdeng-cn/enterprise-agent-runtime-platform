@@ -100,7 +100,7 @@ async def _resolve_scope_targets(
         result = await session.execute(
             select(AgentRun).where(AgentRun.id == run_id)
         )
-        run = result.scalar_one_or_none()
+        run = result.scalars().one_or_none()
         if run is None:
             raise MemoryScopeError(f"Run {run_id} was not found")
         if run.created_by_user_id != owner_user_id:
@@ -471,7 +471,7 @@ async def search_memories(
         result = await session.execute(
             select(AgentRun).where(AgentRun.id == run_id)
         )
-        run = result.scalar_one_or_none()
+        run = result.scalars().one_or_none()
         if run is None:
             raise MemoryScopeError(f"Run {run_id} was not found")
         if run.created_by_user_id != principal.id:
@@ -525,7 +525,7 @@ class MemoryCapabilityService:
             run_result = await session.execute(
                 select(AgentRun).where(AgentRun.id == run_id)
             )
-            run = run_result.scalar_one_or_none()
+            run = run_result.scalars().one_or_none()
             if run is None:
                 raise MemoryNotFoundError(f"Run {run_id} was not found")
             if run.created_by_user_id != principal_id:
@@ -574,7 +574,7 @@ class MemoryCapabilityService:
             run_result = await session.execute(
                 select(AgentRun).where(AgentRun.id == run_id)
             )
-            run = run_result.scalar_one_or_none()
+            run = run_result.scalars().one_or_none()
             if run is None:
                 raise MemoryNotFoundError(f"Run {run_id} was not found")
             if run.created_by_user_id != principal_id:
