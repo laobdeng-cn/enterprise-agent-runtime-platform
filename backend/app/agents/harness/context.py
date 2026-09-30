@@ -13,7 +13,9 @@ from app.agents.harness.contracts import (
 from app.context.budget import (
     ContextBudgetExceededError,
     ContextPolicy,
+    TokenBudgetManager,
     resolve_context_policy,
+    token_budget_manager,
 )
 from app.context.compression import ContextCompressor, context_compressor
 from app.context.skill_selector import SkillSelector, skill_selector
@@ -42,10 +44,12 @@ class ContextBuilder:
         estimator: TokenEstimator | None = None,
         compressor: ContextCompressor | None = None,
         selector: SkillSelector | None = None,
+        budget_manager: TokenBudgetManager | None = None,
     ) -> None:
         self.estimator = estimator or token_estimator
         self.compressor = compressor or context_compressor
         self.selector = selector or skill_selector
+        self.budget_manager = budget_manager or token_budget_manager
 
     def build(
         self,
@@ -107,46 +111,53 @@ class ContextBuilder:
             ]
         )
 
-        # Keep a conservative wrapper allowance for the explanatory context
-        # messages added by ContextPackage.to_messages().
-        flexible_budget = max(
-            0,
-            policy.initial_budget_tokens - mandatory_tokens - 256,
-        )
-        additional_budget = min(
-            policy.additional_context_tokens,
-            int(flexible_budget * 0.40),
-        )
-        memory_budget = min(
-            policy.memory_tokens,
-            int(flexible_budget * 0.35),
-        )
-        skill_budget = min(
-            policy.skill_tokens,
-            flexible_budget - additional_budget - memory_budget,
+        allocation = self.budget_manager.allocate(
+            policy,
+            mandatory_tokens=mandatory_tokens,
         )
 
         fitted_additional, additional_decisions = self._fit_additional(
             items=list(additional_context or []),
             query=user_input,
-            budget=additional_budget,
+            budget=allocation.additional_context_tokens,
             item_max_tokens=policy.item_max_tokens,
         )
         decisions.extend(additional_decisions)
+        used_additional_tokens = sum(
+            item.used_tokens
+            for item in additional_decisions
+            if item.status != "excluded"
+        )
 
+        effective_memory_budget = self.budget_manager.reflow_memory(
+            policy,
+            allocation,
+            used_additional_tokens=used_additional_tokens,
+        )
         fitted_memory, memory_decisions = self._fit_memory(
             memories=list(relevant_memory or []),
             query=user_input,
-            budget=memory_budget,
+            budget=effective_memory_budget,
             item_max_tokens=policy.item_max_tokens,
         )
         decisions.extend(memory_decisions)
+        used_memory_tokens = sum(
+            item.used_tokens
+            for item in memory_decisions
+            if item.status != "excluded"
+        )
 
+        effective_skill_budget = self.budget_manager.reflow_skills(
+            policy,
+            allocation,
+            used_additional_tokens=used_additional_tokens,
+            used_memory_tokens=used_memory_tokens,
+        )
         selected_skill_names, skill_decisions = self._fit_skills(
             candidates=list(skill_candidates or []),
             query=user_input,
             granted_permissions=set(granted_permissions or set()),
-            budget=skill_budget,
+            budget=effective_skill_budget,
             skill_limit=policy.skill_limit,
             fallback_skill_count=policy.fallback_skill_count,
         )
