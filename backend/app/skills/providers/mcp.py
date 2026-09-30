@@ -18,8 +18,6 @@ class MCPExecutionPort(Protocol):
         server_id: UUID,
         tool_name: str,
         arguments: dict[str, Any],
-        principal_id: UUID,
-        run_id: UUID | None,
     ) -> Any: ...
 
 
