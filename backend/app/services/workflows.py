@@ -250,6 +250,12 @@ async def _add_version(
     await session.flush()
 
     for position, definition in enumerate(nodes):
+        agent = await get_agent(session, definition.agent_id)
+        if agent.active_version is None:
+            raise WorkflowValidationError(
+                f"Workflow node '{definition.node_key}' has no "
+                "active AgentVersion to pin"
+            )
         session.add(
             WorkflowNode(
                 workflow_version_id=version.id,
@@ -257,6 +263,7 @@ async def _add_version(
                 name=definition.name,
                 role=definition.role,
                 agent_id=definition.agent_id,
+                agent_version_id=agent.active_version.id,
                 depends_on=list(dict.fromkeys(definition.depends_on)),
                 condition=dict(definition.condition),
                 instructions=definition.instructions,
@@ -601,6 +608,7 @@ async def _execute_node(
                         principal,
                         RunCreate(
                             agent_id=node.agent_id,
+                            agent_version_id=node.agent_version_id,
                             input=prompt,
                             additional_context=[
                                 f"workflow_run_id={workflow_run_id}",
