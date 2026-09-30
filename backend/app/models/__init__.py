@@ -6,6 +6,14 @@ from app.models.mcp import MCPServer, MCPTool
 from app.models.memory import Memory
 from app.models.runtime import AgentRun, RunCheckpoint, RunEvent, RunStep, ToolCall
 from app.models.skill import Skill, SkillVersion, agent_version_skills
+from app.models.workflow import (
+    Workflow,
+    WorkflowCheckpoint,
+    WorkflowNode,
+    WorkflowNodeRun,
+    WorkflowRun,
+    WorkflowVersion,
+)
 from app.models.workspace import Artifact, Workspace
 
 __all__ = [
@@ -25,6 +33,12 @@ __all__ = [
     "SkillVersion",
     "ToolCall",
     "User",
+    "Workflow",
+    "WorkflowCheckpoint",
+    "WorkflowNode",
+    "WorkflowNodeRun",
+    "WorkflowRun",
+    "WorkflowVersion",
     "Workspace",
     "agent_version_skills",
     "role_permissions",
