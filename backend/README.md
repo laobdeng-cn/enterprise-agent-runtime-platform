@@ -2,59 +2,62 @@
 
 FastAPI control plane and execution backend for Enterprise Agent Runtime Platform.
 
-## Current Phase 7 contents
+## Current Phase 8 contents
 
 - JWT authentication and RBAC
 - versioned Agent / AgentVersion
 - versioned Skill / SkillVersion
 - DeepSeek Agent Harness
 - durable AgentRun / RunStep / ToolCall / Checkpoint / Event persistence
-- bounded retry and restart recovery
 - per-Run Workspace + Artifact persistence
-- boundary-safe filesystem resolver and quotas
-- Workspace Skills
-- dedicated Docker Sandbox daemon integration
-- ephemeral Python execution containers
-- default-deny network policy
-- read-only root filesystem
-- non-root execution with dropped Linux capabilities
-- CPU / memory / PID / timeout limits
-- Run-scoped read-only input and working mounts
-- execution-scoped writable output mount
-- `python_execute` Skill
-- durable `SANDBOX_EXECUTION` RunStep + sandbox events
-- output policy validation and Artifact promotion
-- automatic sandbox container cleanup
-- Alembic migrations through 0006
+- isolated Docker Python Sandbox
+- Conversation / Task / Long-term / Semantic Memory
+- USER / AGENT / RUN Memory scopes
+- optional TTL and soft deletion
+- content fingerprint deduplication
+- importance / source / access metadata
+- deterministic English/CJK relevance retrieval
+- automatic relevant-Memory retrieval before model calls
+- Memory IDs/count persisted on MODEL_CALL steps
+- explicit untrusted-Memory ContextBuilder boundary
+- `memory_search` and `memory_write` Skills
+- Memory CRUD/search API
+- Alembic migrations through 0007
 
-## Sandbox execution boundary
+## Memory execution boundary
 
 ```text
-Run / Agent Harness
-      |
-      v
-SandboxExecutionService
-      |
-      v
-Dedicated Docker daemon
-      |
-      v
-Ephemeral Python container
-  ├── input/    RO
-  ├── working/  RO
-  └── output/   RW
-      |
-      v
-validated Artifact metadata
+AgentRun
+   |
+   v
+MemoryRetriever
+   ├── USER
+   ├── AGENT
+   └── RUN
+   |
+   v
+rank + bounded selection
+   |
+   v
+ContextBuilder
+   |
+   +--> explicit untrusted Memory context
+   |
+   v
+Agent Harness -> DeepSeek
 ```
 
-The backend does not execute generated Python in-process and does not provide the sandbox container with a Docker socket.
+Chat history is not persisted as Memory automatically.
 
-## Sandbox API
+## Memory API
 
 ```text
-GET  /api/sandbox/health
-POST /api/runs/{run_id}/sandbox/python
+GET    /api/memories
+POST   /api/memories
+GET    /api/memories/search
+GET    /api/memories/{id}
+PATCH  /api/memories/{id}
+DELETE /api/memories/{id}
 ```
 
 ## Validation
@@ -67,6 +70,6 @@ mypy app
 pytest
 ```
 
-Docker Compose CI additionally performs real isolated Python execution, verifies Run input access, Artifact generation/download, outbound-network denial, hard timeout, persisted SANDBOX_EXECUTION steps and container cleanup.
+Docker Compose CI additionally validates Memory migration/seeding, all three scopes, retrieval ranking, deduplication, soft deletion and Runtime context injection while retaining Phase 6/7 Workspace/Sandbox regression coverage.
 
 Manual local validation remains deferred until all phases are complete.
