@@ -33,7 +33,7 @@ PERMISSIONS: dict[str, str] = {
     "mcp:execute": "Execute an MCP-backed Skill after domain authorization.",
     "knowledge:read": "Read enterprise knowledge through approved connectors.",
     "inventory:read": "Read enterprise inventory through approved connectors.",
-    "work_order:create": "Create enterprise work orders through approved connectors.",
+    "work_order:create": "Create enterprise work orders through approved connectors.",\n    "workflow:read": "Read Workflow definitions and authorized Workflow runs.",\n    "workflow:manage": "Create and version governed Workflow definitions.",\n    "workflow:execute": "Create, start, resume, and cancel authorized Workflow runs.",
     "approval:submit": "Submit an external enterprise approval request.",
     "experiment:read": "Read experiment records through enterprise capabilities.",
     "experiment:create": "Create experiment records through enterprise capabilities.",
