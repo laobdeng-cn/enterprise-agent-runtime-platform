@@ -239,17 +239,13 @@ class MemoryRetriever:
         ]
         if agent_id is not None:
             scope_filters.append(
-                (
-                    (Memory.scope == MemoryScope.AGENT.value)
-                    & (Memory.agent_id == agent_id)
-                )
+                (Memory.scope == MemoryScope.AGENT.value)
+                & (Memory.agent_id == agent_id)
             )
         if run_id is not None:
             scope_filters.append(
-                (
-                    (Memory.scope == MemoryScope.RUN.value)
-                    & (Memory.run_id == run_id)
-                )
+                (Memory.scope == MemoryScope.RUN.value)
+                & (Memory.run_id == run_id)
             )
 
         statement = (
