@@ -18,6 +18,8 @@ from app.mcp.contracts import MCPHealthResult, MCPRemoteTool
 from app.models.mcp import MCPServer, MCPTool
 from app.models.skill import Skill, SkillVersion
 from app.schemas.mcp import MCPServerCreate, MCPServerUpdate
+from app.services.auth import get_user_by_id, permission_codes
+from app.services.skills import validate_skill_contract
 
 
 class MCPServerNotFoundError(LookupError):
@@ -194,21 +196,11 @@ def _skill_name(server: MCPServer, tool_name: str) -> str:
     return candidate
 
 
-def _inferred_side_effect(tool: MCPRemoteTool) -> str:
-    annotations = tool.annotations
-    read_only = bool(
-        annotations.get("readOnlyHint")
-        or annotations.get("read_only_hint")
-    )
-    destructive = bool(
-        annotations.get("destructiveHint")
-        or annotations.get("destructive_hint")
-    )
-    if read_only:
-        return "READ_ONLY"
-    if destructive:
-        return "IRREVERSIBLE_WRITE"
-    return "REVERSIBLE_WRITE"
+def _default_side_effect(_: MCPRemoteTool) -> str:
+    # Remote annotations are descriptive metadata, not authorization policy.
+    # Unknown capabilities default to SENSITIVE until the platform owner maps
+    # them explicitly in MCPServer.config.side_effect_map.
+    return "SENSITIVE"
 
 
 def _tool_permissions(
@@ -232,6 +224,10 @@ async def _sync_skill(
     side_effect: str,
 ) -> Skill:
     name = _skill_name(server, tool.name)
+    validate_skill_contract(
+        dict(tool.input_schema),
+        dict(tool.output_schema),
+    )
     result = await session.execute(
         select(Skill)
         .options(
@@ -359,7 +355,7 @@ async def discover_mcp_server(
         required_permissions = _tool_permissions(server, remote)
         side_effect = side_effect_map.get(
             remote.name,
-            _inferred_side_effect(remote),
+            _default_side_effect(remote),
         )
 
         local = existing.get(remote.name)
@@ -436,6 +432,8 @@ class MCPExecutionService:
         server_id: UUID,
         tool_name: str,
         arguments: dict[str, Any],
+        principal_id: UUID,
+        run_id: UUID | None,
     ) -> Any:
         async with self.session_factory() as session:
             server = await get_mcp_server(session, server_id)
@@ -451,6 +449,20 @@ class MCPExecutionService:
                 raise MCPExecutionConfigurationError(
                     f"MCP tool '{tool_name}' is not active on '{server.name}'"
                 )
+
+            principal = await get_user_by_id(session, principal_id)
+            if principal is None or not principal.is_active:
+                raise PermissionError("MCP execution principal is unavailable")
+
+            current_permissions = permission_codes(principal)
+            missing = sorted(
+                set(tool.required_permissions) - current_permissions
+            )
+            if missing:
+                raise PermissionError(
+                    "Missing current MCP permissions: " + ", ".join(missing)
+                )
+
             return await self.client.call_tool(
                 server,
                 tool_name=tool_name,
