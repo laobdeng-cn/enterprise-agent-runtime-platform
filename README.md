@@ -2,7 +2,7 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-9%20Context%20Engineering-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-10%20MCP%20%2B%20Enterprise%20Data-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-provider-informational)](#technology-stack)
@@ -11,7 +11,7 @@
 
 Enterprise Agent Runtime Platform is a governed execution platform rather than a thin LLM chat wrapper.
 
-**Phase 9 is implemented.** Every model request is now built through a token-budgeted Context Engineering pipeline that preserves authoritative input, bounds/compresses Memory and additional context, selects only relevant authorized Skills, controls growing tool history, and persists inspectable inclusion/exclusion metadata.
+**Phase 10 is implemented.** The Runtime now discovers enterprise capabilities over MCP, persists remote tool contracts, synchronizes them into governed SkillVersions, applies platform-owned permission/side-effect policy, and connects first-party knowledge, experiment, inventory, work-order, and approval services.
 
 ## Current architecture
 
@@ -51,6 +51,11 @@ Authenticated Principal
               ├── input/    read-only
               ├── working/  read-only
               └── output/   isolated write
+        |
+        +--> MCP Registry
+              ├── knowledge-mcp
+              ├── experiment-mcp
+              └── enterprise-mcp
         |
         v
    Agent Harness
@@ -130,6 +135,10 @@ Workspace
 
 Memory
 └── memories
+
+Enterprise capabilities
+├── mcp_servers
+└── mcp_tools
 ```
 
 ## Runtime invariants
@@ -163,6 +172,12 @@ Memory
 27. the model can execute only the SkillVersions exposed by the current Context plan.
 28. tool-result history is re-budgeted before every model call.
 29. every Context decision is recorded as inspectable metadata before provider invocation.
+30. MCP servers provide capabilities but never grant authorization.
+31. discovered MCP contracts are validated and persisted before becoming Skills.
+32. remote annotations cannot lower platform-owned permission or side-effect policy.
+33. unmapped MCP capabilities default to SENSITIVE.
+34. current principal permissions are re-evaluated immediately before every MCP call.
+35. MCP Skills pass through the same Context, SkillExecutor, and RBAC boundaries as local capabilities.
 
 ## Technology stack
 
@@ -184,6 +199,9 @@ Memory
 | Memory scopes | USER / AGENT / RUN |
 | Context engineering | Token Budget Manager, extractive compression, relevant Skill selection |
 | Context inspection | persisted per-component inclusion/exclusion trace |
+| Enterprise connectors | MCP Streamable HTTP + durable server/tool registry |
+| MCP services | Knowledge, Experiment, Enterprise Operations |
+| Connector governance | RBAC + domain permission map + side-effect policy |
 | Frontend | Vue 3, TypeScript, Element Plus |
 | Quality | pytest, Ruff, mypy, GitHub Actions |
 
@@ -200,8 +218,8 @@ Phase 6  ✅ Workspace + Artifacts
 Phase 7  ✅ Docker Sandbox
 Phase 8  ✅ Memory System
 Phase 9  ✅ Context Engineering
-Phase 10 ⏭ MCP + Enterprise Data
-Phase 11    Workflow + Multi-Agent
+Phase 10 ✅ MCP + Enterprise Data
+Phase 11 ⏭ Workflow + Multi-Agent
 Phase 12    Human-in-the-loop + Policy Engine
 Phase 13    Trace + Observability
 Phase 14    Agent Evaluation + Regression
@@ -228,6 +246,7 @@ Manual end-to-end validation is intentionally deferred until all phases are fini
 - [Phase 7 Docker Sandbox](docs/13-phase7-docker-sandbox.md)
 - [Phase 8 Memory System](docs/14-phase8-memory-system.md)
 - [Phase 9 Context Engineering](docs/15-phase9-context-engineering.md)
+- [Phase 10 MCP + Enterprise Data](docs/16-phase10-mcp-enterprise-data.md)
 
 ## License
 
