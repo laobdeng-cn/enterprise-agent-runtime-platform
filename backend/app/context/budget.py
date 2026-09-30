@@ -149,3 +149,88 @@ def resolve_context_policy(
             maximum=8,
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ContextAllocation:
+    flexible_tokens: int
+    additional_context_tokens: int
+    memory_tokens: int
+    skill_tokens: int
+
+
+class TokenBudgetManager:
+    """Allocates the initial request budget across non-authoritative context."""
+
+    wrapper_reserve_tokens: int = 256
+
+    def allocate(
+        self,
+        policy: ContextPolicy,
+        *,
+        mandatory_tokens: int,
+    ) -> ContextAllocation:
+        if mandatory_tokens > policy.initial_budget_tokens:
+            raise ContextBudgetExceededError(
+                "Authoritative context exceeds the initial token budget"
+            )
+
+        flexible = max(
+            0,
+            policy.initial_budget_tokens
+            - mandatory_tokens
+            - self.wrapper_reserve_tokens,
+        )
+        additional = min(
+            policy.additional_context_tokens,
+            int(flexible * 0.40),
+        )
+        memory = min(
+            policy.memory_tokens,
+            int(flexible * 0.35),
+        )
+        skill = min(
+            policy.skill_tokens,
+            flexible - additional - memory,
+        )
+        return ContextAllocation(
+            flexible_tokens=flexible,
+            additional_context_tokens=additional,
+            memory_tokens=memory,
+            skill_tokens=skill,
+        )
+
+    @staticmethod
+    def reflow_memory(
+        policy: ContextPolicy,
+        allocation: ContextAllocation,
+        *,
+        used_additional_tokens: int,
+    ) -> int:
+        unused_additional = max(
+            0,
+            allocation.additional_context_tokens - used_additional_tokens,
+        )
+        return min(
+            policy.memory_tokens,
+            allocation.memory_tokens + unused_additional,
+        )
+
+    @staticmethod
+    def reflow_skills(
+        policy: ContextPolicy,
+        allocation: ContextAllocation,
+        *,
+        used_additional_tokens: int,
+        used_memory_tokens: int,
+    ) -> int:
+        remaining = max(
+            0,
+            allocation.flexible_tokens
+            - used_additional_tokens
+            - used_memory_tokens,
+        )
+        return min(policy.skill_tokens, remaining)
+
+
+token_budget_manager = TokenBudgetManager()
