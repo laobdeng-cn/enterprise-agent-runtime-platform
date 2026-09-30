@@ -2,7 +2,7 @@
 
 > 企业级智能体运行与自动化平台 — a production-oriented runtime for building, executing, governing, and evaluating enterprise AI agents.
 
-[![Phase](https://img.shields.io/badge/phase-8%20Memory%20System-blue)](#development-roadmap)
+[![Phase](https://img.shields.io/badge/phase-9%20Context%20Engineering-blue)](#development-roadmap)
 [![CI](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/laobdeng-cn/enterprise-agent-runtime-platform/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-informational)](#technology-stack)
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-provider-informational)](#technology-stack)
@@ -11,7 +11,7 @@
 
 Enterprise Agent Runtime Platform is a governed execution platform rather than a thin LLM chat wrapper.
 
-**Phase 8 is implemented.** Durable Runs now retrieve explicit scoped Memory across USER / AGENT / RUN boundaries, inject only relevant retained state into model context, and expose governed Memory read/write capabilities without treating chat history as Memory.
+**Phase 9 is implemented.** Every model request is now built through a token-budgeted Context Engineering pipeline that preserves authoritative input, bounds/compresses Memory and additional context, selects only relevant authorized Skills, controls growing tool history, and persists inspectable inclusion/exclusion metadata.
 
 ## Current architecture
 
@@ -39,6 +39,13 @@ Authenticated Principal
         |
         v
  Durable Runtime
+        |
+        +--> Context Engineering
+              ├── Token Budget Manager
+              ├── Context Compressor
+              ├── Memory selection
+              ├── Skill Selector
+              └── Context Trace
         |
         +--> Docker Sandbox
               ├── input/    read-only
@@ -81,6 +88,7 @@ The runtime stores checkpoints in PostgreSQL. If the backend restarts while a Ru
 GET  /api/runs
 POST /api/runs
 GET  /api/runs/{run_id}
+GET  /api/runs/{run_id}/context
 POST /api/runs/{run_id}/start
 POST /api/runs/{run_id}/pause
 POST /api/runs/{run_id}/resume
@@ -149,6 +157,12 @@ Memory
 21. expired/deleted Memory is excluded from runtime retrieval.
 22. retrieved Memory is untrusted context and cannot override system/RBAC/tool policy.
 23. Runtime injects a bounded relevance-ranked Memory set rather than replaying all retained state.
+24. system instructions and the current user request are never silently truncated by Context Engineering.
+25. lower-priority context is compressed or excluded under an explicit token budget.
+26. Skill permissions are evaluated before relevance selection.
+27. the model can execute only the SkillVersions exposed by the current Context plan.
+28. tool-result history is re-budgeted before every model call.
+29. every Context decision is recorded as inspectable metadata before provider invocation.
 
 ## Technology stack
 
@@ -168,6 +182,8 @@ Memory
 | Sandbox policy | no network, read-only root, non-root, CPU/RAM/PID/time limits |
 | Memory | PostgreSQL scoped Memory + deterministic relevance retrieval |
 | Memory scopes | USER / AGENT / RUN |
+| Context engineering | Token Budget Manager, extractive compression, relevant Skill selection |
+| Context inspection | persisted per-component inclusion/exclusion trace |
 | Frontend | Vue 3, TypeScript, Element Plus |
 | Quality | pytest, Ruff, mypy, GitHub Actions |
 
@@ -183,8 +199,8 @@ Phase 5  ✅ Durable Agent Runtime
 Phase 6  ✅ Workspace + Artifacts
 Phase 7  ✅ Docker Sandbox
 Phase 8  ✅ Memory System
-Phase 9  ⏭ Context Engineering
-Phase 10    MCP + Enterprise Data
+Phase 9  ✅ Context Engineering
+Phase 10 ⏭ MCP + Enterprise Data
 Phase 11    Workflow + Multi-Agent
 Phase 12    Human-in-the-loop + Policy Engine
 Phase 13    Trace + Observability
@@ -211,6 +227,7 @@ Manual end-to-end validation is intentionally deferred until all phases are fini
 - [Phase 6 Workspace + Artifacts](docs/12-phase6-workspace-artifacts.md)
 - [Phase 7 Docker Sandbox](docs/13-phase7-docker-sandbox.md)
 - [Phase 8 Memory System](docs/14-phase8-memory-system.md)
+- [Phase 9 Context Engineering](docs/15-phase9-context-engineering.md)
 
 ## License
 
