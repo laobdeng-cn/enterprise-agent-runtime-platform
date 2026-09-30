@@ -82,11 +82,62 @@ class MemoryContextItem(BaseModel):
     source: str
 
 
+class SkillContextItem(BaseModel):
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    required_permissions: list[str] = Field(default_factory=list)
+    side_effect: str = "READ_ONLY"
+
+
+class ContextDecision(BaseModel):
+    component_id: str
+    kind: Literal[
+        "system",
+        "user",
+        "additional_context",
+        "memory",
+        "skill",
+        "tool_history",
+    ]
+    label: str
+    status: Literal["included", "compressed", "excluded"]
+    reason: str
+    priority: int
+    original_tokens: int
+    used_tokens: int
+    score: float | None = None
+    preview: str = ""
+
+
+class ContextBudget(BaseModel):
+    context_window_tokens: int
+    reserved_output_tokens: int
+    runtime_reserve_tokens: int
+    input_budget_tokens: int
+    initial_budget_tokens: int
+    used_tokens: int
+    remaining_tokens: int
+    message_tokens: int
+    tool_tokens: int
+
+
+class ContextTrace(BaseModel):
+    budget: ContextBudget
+    decisions: list[ContextDecision] = Field(default_factory=list)
+    selected_skill_names: list[str] = Field(default_factory=list)
+    excluded_skill_names: list[str] = Field(default_factory=list)
+    compression_count: int = 0
+    policy: dict[str, Any] = Field(default_factory=dict)
+
+
 class ContextPackage(BaseModel):
     system_instructions: str
     user_input: str
     additional_context: list[str] = Field(default_factory=list)
     relevant_memory: list[MemoryContextItem] = Field(default_factory=list)
+    selected_skill_names: list[str] = Field(default_factory=list)
+    trace: ContextTrace
 
     def to_messages(self) -> list[ModelMessage]:
         messages = [
