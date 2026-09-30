@@ -2,7 +2,7 @@
 
 Vue 3 + TypeScript engineering console for Enterprise Agent Runtime Platform.
 
-## Current Phase 8 contents
+## Current Phase 9 contents
 
 - infrastructure health
 - authentication/current principal
@@ -13,14 +13,17 @@ Vue 3 + TypeScript engineering console for Enterprise Agent Runtime Platform.
 - Artifact metadata
 - Python Sandbox Console
 - Memory Inspector
-- Memory relevance search
-- selected Agent/Run Memory context
-- Conversation / Task / Long-term / Semantic type display
-- USER / AGENT / RUN scope display
-- importance and access metrics
-- explicit durable Memory creation
-- Memory soft deletion
+- Context Inspector
+- Context preview for PENDING Runs
+- persisted Context-plan inspection after execution
+- input/used/remaining token-budget display
+- runtime-reserve display
+- selected Skill display
+- per-component included/compressed/excluded state
+- relevance score display
+- token usage per Context component
+- inclusion/exclusion reason and content preview
 
-The Memory Inspector deliberately separates retained Memory from ordinary chat history. Memory creation is explicit and permission-gated.
+The Context Inspector is an engineering/operator surface. It exposes the platform's Context decisions without changing the model execution path.
 
 Manual end-to-end validation remains deferred until all planned phases are complete.
