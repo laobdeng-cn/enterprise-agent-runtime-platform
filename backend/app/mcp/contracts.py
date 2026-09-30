@@ -1,46 +1,18 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
-class MCPToolDescriptor(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class MCPRemoteTool(BaseModel):
     name: str
     description: str = ""
-    input_schema: dict[str, Any] = Field(
-        default_factory=dict,
-        alias="inputSchema",
-    )
-    output_schema: dict[str, Any] = Field(
-        default_factory=dict,
-        alias="outputSchema",
-    )
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
     annotations: dict[str, Any] = Field(default_factory=dict)
 
 
-class MCPInitializeResult(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    protocol_version: str = Field(alias="protocolVersion")
-    capabilities: dict[str, Any] = Field(default_factory=dict)
-    server_info: dict[str, Any] = Field(
-        default_factory=dict,
-        alias="serverInfo",
-    )
-
-
-class MCPCallContent(BaseModel):
-    type: str
-    text: str | None = None
-
-
-class MCPCallResult(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    content: list[MCPCallContent] = Field(default_factory=list)
-    structured_content: Any = Field(
-        default=None,
-        alias="structuredContent",
-    )
-    is_error: bool = Field(default=False, alias="isError")
+class MCPHealthResult(BaseModel):
+    status: str
+    latency_ms: float
+    tool_count: int
+    error: str | None = None

@@ -1,168 +1,153 @@
-import json
+import asyncio
+from time import perf_counter
 from typing import Any
-from uuid import uuid4
 
-import httpx
+from mcp import Client
 
-from app.mcp.contracts import (
-    MCPCallResult,
-    MCPInitializeResult,
-    MCPToolDescriptor,
-)
+from app.mcp.contracts import MCPHealthResult, MCPRemoteTool
+from app.models.mcp import MCPServer
 
 
-class MCPError(RuntimeError):
+class MCPClientError(RuntimeError):
     pass
 
 
-class MCPTransportError(MCPError):
+class MCPServerUnavailableError(MCPClientError):
     pass
 
 
-class MCPProtocolError(MCPError):
+class MCPRemoteToolError(MCPClientError):
     pass
 
 
-class MCPRemoteError(MCPError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: int | None = None,
-        data: Any = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.data = data
+class MCPClientRegistry:
+    """Transport-aware client facade for registered MCP servers."""
 
+    async def list_tools(self, server: MCPServer) -> list[MCPRemoteTool]:
+        self._validate_server(server)
+        try:
+            async with asyncio.timeout(server.timeout_seconds):
+                async with Client(server.url) as client:
+                    result = await client.list_tools()
+        except Exception as exc:
+            raise MCPServerUnavailableError(
+                f"MCP server '{server.name}' discovery failed with "
+                f"{exc.__class__.__name__}"
+            ) from exc
 
-class MCPHttpClient:
-    def __init__(
-        self,
-        *,
-        timeout_seconds: float = 20.0,
-        transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None:
-        self.timeout_seconds = timeout_seconds
-        self.transport = transport
+        tools: list[MCPRemoteTool] = []
+        for tool in result.tools:
+            output_schema = getattr(tool, "output_schema", None) or {}
+            annotations = getattr(tool, "annotations", None)
+            if annotations is None:
+                annotations_payload: dict[str, Any] = {}
+            elif hasattr(annotations, "model_dump"):
+                annotations_payload = annotations.model_dump(
+                    mode="json",
+                    by_alias=True,
+                    exclude_none=True,
+                )
+            elif isinstance(annotations, dict):
+                annotations_payload = dict(annotations)
+            else:
+                annotations_payload = {}
 
-    async def initialize(
-        self,
-        endpoint_url: str,
-        *,
-        protocol_version: str,
-    ) -> MCPInitializeResult:
-        result = await self._request(
-            endpoint_url,
-            method="initialize",
-            params={
-                "protocolVersion": protocol_version,
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "enterprise-agent-runtime-platform",
-                    "version": "0.10.0",
-                },
-            },
+            tools.append(
+                MCPRemoteTool(
+                    name=tool.name,
+                    description=tool.description or "",
+                    input_schema=dict(tool.input_schema or {}),
+                    output_schema=dict(output_schema),
+                    annotations=annotations_payload,
+                )
+            )
+        return tools
+
+    async def health(self, server: MCPServer) -> MCPHealthResult:
+        started = perf_counter()
+        try:
+            tools = await self.list_tools(server)
+        except MCPClientError as exc:
+            return MCPHealthResult(
+                status="unavailable",
+                latency_ms=(perf_counter() - started) * 1000,
+                tool_count=0,
+                error=str(exc),
+            )
+        return MCPHealthResult(
+            status="ok",
+            latency_ms=(perf_counter() - started) * 1000,
+            tool_count=len(tools),
         )
-        return MCPInitializeResult.model_validate(result)
-
-    async def list_tools(
-        self,
-        endpoint_url: str,
-    ) -> list[MCPToolDescriptor]:
-        result = await self._request(
-            endpoint_url,
-            method="tools/list",
-            params={},
-        )
-        tools_raw = result.get("tools")
-        if not isinstance(tools_raw, list):
-            raise MCPProtocolError("MCP tools/list response has no tools array")
-        return [
-            MCPToolDescriptor.model_validate(item)
-            for item in tools_raw
-        ]
 
     async def call_tool(
         self,
-        endpoint_url: str,
+        server: MCPServer,
         *,
         tool_name: str,
         arguments: dict[str, Any],
-        metadata: dict[str, Any] | None = None,
-    ) -> MCPCallResult:
-        params: dict[str, Any] = {
-            "name": tool_name,
-            "arguments": arguments,
-        }
-        if metadata:
-            params["_meta"] = metadata
-        result = await self._request(
-            endpoint_url,
-            method="tools/call",
-            params=params,
-        )
-        return MCPCallResult.model_validate(result)
-
-    async def _request(
-        self,
-        endpoint_url: str,
-        *,
-        method: str,
-        params: dict[str, Any],
-    ) -> dict[str, Any]:
-        request_id = str(uuid4())
-        payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }
-
+    ) -> Any:
+        self._validate_server(server)
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout_seconds,
-                transport=self.transport,
-            ) as client:
-                response = await client.post(
-                    endpoint_url,
-                    json=payload,
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                    },
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise MCPTransportError(
-                f"MCP transport failed with {exc.__class__.__name__}"
+            async with asyncio.timeout(server.timeout_seconds):
+                async with Client(server.url) as client:
+                    result = await client.call_tool(
+                        tool_name,
+                        dict(arguments),
+                    )
+        except Exception as exc:
+            raise MCPServerUnavailableError(
+                f"MCP tool '{tool_name}' on '{server.name}' failed with "
+                f"{exc.__class__.__name__}"
             ) from exc
 
-        try:
-            body = response.json()
-        except json.JSONDecodeError as exc:
-            raise MCPProtocolError(
-                "MCP server returned invalid JSON"
-            ) from exc
-
-        if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
-            raise MCPProtocolError("Invalid MCP JSON-RPC envelope")
-        if str(body.get("id")) != request_id:
-            raise MCPProtocolError("MCP response id does not match request")
-
-        error = body.get("error")
-        if isinstance(error, dict):
-            raise MCPRemoteError(
-                str(error.get("message") or "MCP remote error"),
-                code=(
-                    int(error["code"])
-                    if isinstance(error.get("code"), int)
-                    else None
-                ),
-                data=error.get("data"),
+        if bool(getattr(result, "is_error", False)):
+            raise MCPRemoteToolError(
+                self._text_content(result)
+                or f"MCP tool '{tool_name}' returned an error"
             )
 
-        result = body.get("result")
-        if not isinstance(result, dict):
-            raise MCPProtocolError("MCP response has no object result")
-        return result
+        structured = getattr(result, "structured_content", None)
+        if structured is not None:
+            return structured
+
+        return {
+            "content": [
+                block.model_dump(
+                    mode="json",
+                    by_alias=True,
+                    exclude_none=True,
+                )
+                if hasattr(block, "model_dump")
+                else str(block)
+                for block in getattr(result, "content", [])
+            ]
+        }
+
+    @staticmethod
+    def _text_content(result: Any) -> str:
+        values: list[str] = []
+        for block in getattr(result, "content", []):
+            text = getattr(block, "text", None)
+            if text:
+                values.append(str(text))
+        return "\n".join(values)
+
+    @staticmethod
+    def _validate_server(server: MCPServer) -> None:
+        if server.status != "active":
+            raise MCPServerUnavailableError(
+                f"MCP server '{server.name}' is not active"
+            )
+        if server.transport != "streamable_http":
+            raise MCPClientError(
+                f"Unsupported MCP transport '{server.transport}'"
+            )
+        if server.auth_mode != "none":
+            raise MCPClientError(
+                "Phase 10 supports secret references but only auth_mode='none' "
+                "is executable until a credential resolver is introduced"
+            )
+
+
+mcp_client_registry = MCPClientRegistry()
