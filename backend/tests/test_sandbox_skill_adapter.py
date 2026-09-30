@@ -1,4 +1,5 @@
 import uuid
+
 import pytest
 
 from app.models.skill import Skill, SkillVersion
