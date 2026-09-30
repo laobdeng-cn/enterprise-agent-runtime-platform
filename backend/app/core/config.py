@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     app_name: str = "enterprise-agent-runtime-platform"
-    app_version: str = "0.10.0"
+    app_version: str = "0.11.0"
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
