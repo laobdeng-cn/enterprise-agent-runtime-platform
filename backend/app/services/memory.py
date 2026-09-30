@@ -97,10 +97,7 @@ async def _resolve_scope_targets(
     if scope == MemoryScope.RUN:
         if run_id is None:
             raise MemoryScopeError("RUN scope requires run_id")
-        result = await session.execute(
-            select(AgentRun).where(AgentRun.id == run_id)
-        )
-        run = result.scalars().one_or_none()
+        run = await session.get(AgentRun, run_id)
         if run is None:
             raise MemoryScopeError(f"Run {run_id} was not found")
         if run.created_by_user_id != owner_user_id:
@@ -468,10 +465,7 @@ async def search_memories(
 ) -> list[RankedMemory]:
     effective_agent_id = agent_id
     if run_id is not None:
-        result = await session.execute(
-            select(AgentRun).where(AgentRun.id == run_id)
-        )
-        run = result.scalars().one_or_none()
+        run = await session.get(AgentRun, run_id)
         if run is None:
             raise MemoryScopeError(f"Run {run_id} was not found")
         if run.created_by_user_id != principal.id:
@@ -522,10 +516,7 @@ class MemoryCapabilityService:
         limit: int,
     ) -> list[dict[str, Any]]:
         async with self.session_factory() as session:
-            run_result = await session.execute(
-                select(AgentRun).where(AgentRun.id == run_id)
-            )
-            run = run_result.scalars().one_or_none()
+            run = await session.get(AgentRun, run_id)
             if run is None:
                 raise MemoryNotFoundError(f"Run {run_id} was not found")
             if run.created_by_user_id != principal_id:
@@ -571,10 +562,7 @@ class MemoryCapabilityService:
         metadata: dict[str, Any],
     ) -> dict[str, Any]:
         async with self.session_factory() as session:
-            run_result = await session.execute(
-                select(AgentRun).where(AgentRun.id == run_id)
-            )
-            run = run_result.scalars().one_or_none()
+            run = await session.get(AgentRun, run_id)
             if run is None:
                 raise MemoryNotFoundError(f"Run {run_id} was not found")
             if run.created_by_user_id != principal_id:
