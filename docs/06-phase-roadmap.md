@@ -163,17 +163,24 @@ Implemented:
 
 ## Phase 9 — Context Engineering
 
-Implement:
+**Status: implemented.**
 
-- Context Builder;
-- token budget manager;
-- prioritization rules;
-- history summarization/compression;
-- relevant skill selection;
-- Context Inspector;
-- context trace metadata.
+Implemented:
 
-**Exit criteria:** every model request can explain which context components were included/excluded and why.
+- token-budgeted Context Builder;
+- explicit Token Budget Manager;
+- provider-independent token estimation;
+- AgentVersion `context_policy` overrides;
+- mandatory system/current-user preservation;
+- additional-context and Memory compression;
+- runtime tool-history compression;
+- permission-first relevant Skill selection;
+- bounded Skill-definition injection;
+- persisted per-component ContextTrace metadata;
+- `run.context_prepared` event;
+- Context Inspector API and UI.
+
+**Exit criteria:** every model request can explain which context components were included, compressed, or excluded and why, while authoritative input is never silently truncated.
 
 ---
 
