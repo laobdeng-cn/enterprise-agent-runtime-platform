@@ -131,7 +131,7 @@ class AgentHarness:
                         "tool_rounds": tool_round,
                         "memory_ids": [
                             str(item.id)
-                            for item in (relevant_memory or [])
+                            for item in context_package.relevant_memory
                         ],
                         "memory_count": len(
                             context_package.relevant_memory
@@ -250,10 +250,7 @@ class AgentHarness:
                 side_effect=skill_version.side_effect,
             )
             for skill_version in version.bound_skill_versions
-            if (
-                skill_version.skill.status == "active"
-                and skill_version.skill.name in selected_names
-            )
+            if skill_version.skill.status == "active"
         ]
 
     @staticmethod
@@ -269,7 +266,10 @@ class AgentHarness:
                 parameters=dict(skill_version.input_schema),
             )
             for skill_version in version.bound_skill_versions
-            if skill_version.skill.status == "active"
+            if (
+                skill_version.skill.status == "active"
+                and skill_version.skill.name in selected_names
+            )
         ]
         return sorted(definitions, key=lambda item: item.name)
 
