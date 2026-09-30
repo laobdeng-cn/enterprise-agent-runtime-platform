@@ -14,7 +14,7 @@ from app.db.base import Base
 class Workflow(Base):
     __tablename__ = "workflows"
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(\n        Uuid(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n    )
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
@@ -31,8 +31,8 @@ class Workflow(Base):
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n    )
+    updated_at: Mapped[datetime] = mapped_column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n        onupdate=func.now(),\n    )
 
     versions: Mapped[list["WorkflowVersion"]] = relationship(
         back_populates="workflow",
@@ -52,7 +52,7 @@ class WorkflowVersion(Base):
         UniqueConstraint("workflow_id", "version", name="uq_workflow_versions_workflow_version"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(\n        Uuid(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n    )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -63,7 +63,7 @@ class WorkflowVersion(Base):
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n    )
 
     workflow: Mapped[Workflow] = relationship(
         back_populates="versions", foreign_keys=[workflow_id]
@@ -82,7 +82,7 @@ class WorkflowNode(Base):
         UniqueConstraint("workflow_version_id", "node_key", name="uq_workflow_nodes_version_key"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(\n        Uuid(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n    )
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("workflow_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -105,7 +105,7 @@ class WorkflowNode(Base):
 class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(\n        Uuid(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n    )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("workflows.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -116,15 +116,15 @@ class WorkflowRun(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", index=True)
-    input_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    input_data: Mapped[dict[str, Any]] = mapped_column(\n        JSON,\n        nullable=False,\n        default=dict,\n    )
     permission_snapshot: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     result_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     state_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n        onupdate=func.now(),\n    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     node_runs: Mapped[list["WorkflowNodeRun"]] = relationship(
@@ -147,12 +147,12 @@ class WorkflowNodeRun(Base):
         UniqueConstraint("workflow_run_id", "node_key", name="uq_workflow_node_runs_run_key"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(\n        Uuid(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n    )
     workflow_run_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),\n        ForeignKey("workflow_runs.id", ondelete="CASCADE"),\n        nullable=False,\n        index=True,
     )
     workflow_node_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("workflow_nodes.id", ondelete="RESTRICT"), nullable=False, index=True
+        Uuid(as_uuid=True),\n        ForeignKey("workflow_nodes.id", ondelete="RESTRICT"),\n        nullable=False,\n        index=True,
     )
     node_key: Mapped[str] = mapped_column(String(64), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -160,9 +160,9 @@ class WorkflowNodeRun(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", index=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),\n        ForeignKey("agent_runs.id", ondelete="SET NULL"),\n        nullable=True,\n        index=True,
     )
-    input_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    input_data: Mapped[dict[str, Any]] = mapped_column(\n        JSON,\n        nullable=False,\n        default=dict,\n    )
     output_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -174,17 +174,17 @@ class WorkflowNodeRun(Base):
 class WorkflowCheckpoint(Base):
     __tablename__ = "workflow_checkpoints"
     __table_args__ = (
-        UniqueConstraint("workflow_run_id", "sequence", name="uq_workflow_checkpoints_run_sequence"),
+        UniqueConstraint(\n            "workflow_run_id",\n            "sequence",\n            name="uq_workflow_checkpoints_run_sequence",\n        ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(\n        Uuid(as_uuid=True),\n        primary_key=True,\n        default=uuid.uuid4,\n    )
     workflow_run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
     kind: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    payload: Mapped[dict[str, Any]] = mapped_column(\n        JSON,\n        nullable=False,\n        default=dict,\n    )
+    created_at: Mapped[datetime] = mapped_column(\n        DateTime(timezone=True),\n        nullable=False,\n        server_default=func.now(),\n    )
 
-    workflow_run: Mapped[WorkflowRun] = relationship(back_populates="checkpoints")
+    workflow_run: Mapped[WorkflowRun] = relationship(\n        back_populates="checkpoints"\n    )
