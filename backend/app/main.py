@@ -9,6 +9,7 @@ from app.clients.redis import redis_client
 from app.core.config import settings
 from app.db.session import async_session_maker, engine
 from app.services.runtime import recover_incomplete_runs
+from app.services.workflows import recover_incomplete_workflow_runs
 from app.services.sandbox import sandbox_manager
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             logger.warning(
                 "Recovered %s interrupted Run(s) into PAUSED state",
                 recovered,
+            )
+
+        workflow_recovered = await recover_incomplete_workflow_runs(session)
+        if workflow_recovered:
+            logger.warning(
+                "Recovered %s interrupted WorkflowRun(s) into PAUSED state",
+                workflow_recovered,
             )
 
     yield
