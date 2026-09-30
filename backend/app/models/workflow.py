@@ -129,7 +129,16 @@ class WorkflowNode(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     agent_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("agents.id", ondelete="RESTRICT"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("agents.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("agent_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     depends_on: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     condition: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
