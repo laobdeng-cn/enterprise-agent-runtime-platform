@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
   integration:
-    name: Docker Compose Sandbox Runtime smoke test
+    name: Docker Compose Memory Runtime smoke test
     runs-on: ubuntu-latest
     env:
       JWT_SECRET_KEY: ci-only-secret-key-not-for-production
@@ -93,7 +93,7 @@ jobs:
         run: |
           SKILLS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/skills)
 
-          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; expected={'system_echo','math_add','text_stats','workspace_list','workspace_read_text','workspace_write_text','artifact_publish','python_execute'}; assert expected <= names"
+          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; expected={'system_echo','math_add','text_stats','workspace_list','workspace_read_text','workspace_write_text','artifact_publish','python_execute','memory_search','memory_write'}; assert expected <= names"
 
           MATH_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); print(next(item['id'] for item in data if item['name']=='math_add'))")
 
@@ -110,10 +110,10 @@ jobs:
               "model_provider":"deepseek",
               "model_name":"deepseek-chat",
               "temperature":0.2,
-              "skills":["workspace_list","workspace_read_text","workspace_write_text","artifact_publish","python_execute"]
+              "skills":["workspace_list","workspace_read_text","workspace_write_text","artifact_publish","python_execute","memory_search","memory_write"]
             }'             http://localhost:8000/api/agents)
 
-          AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; d=json.load(sys.stdin); skills=set(d['versions'][0]['skills']); assert {'artifact_publish','python_execute','workspace_list','workspace_read_text','workspace_write_text'} <= skills; print(d['id'])")
+          AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; d=json.load(sys.stdin); skills=set(d['versions'][0]['skills']); assert {'artifact_publish','python_execute','workspace_list','workspace_read_text','workspace_write_text','memory_search','memory_write'} <= skills; print(d['id'])")
           echo "AGENT_ID=$AGENT_ID" >> "$GITHUB_ENV"
 
       - name: Create durable Run and Workspace
@@ -244,9 +244,53 @@ jobs:
 
           docker compose exec -T docker sh -c             'test -z "$(docker ps -aq --filter label=earp.sandbox=true)"'
 
-      - name: Verify durable execution failure semantics
+      - name: Verify scoped durable Memory CRUD and search
+        run: |
+          USER_MEMORY=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"memory_type":"LONG_TERM","scope":"USER","content":"Prepare concise Markdown reports for enterprise analysis.","importance":0.85,"metadata":{"source":"ci"}}'             http://localhost:8000/api/memories)
+
+          USER_MEMORY_ID=$(printf '%s' "$USER_MEMORY" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['memory_type']=='LONG_TERM'; assert d['scope']=='USER'; assert d['status']=='ACTIVE'; print(d['id'])")
+          echo "USER_MEMORY_ID=$USER_MEMORY_ID" >> "$GITHUB_ENV"
+
+          AGENT_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"memory_type":"SEMANTIC","scope":"AGENT","agent_id":os.environ["AGENT_ID"],"content":"This Agent should use concise report structure for analysis tasks.","importance":0.9}))')
+          AGENT_MEMORY=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$AGENT_PAYLOAD"             http://localhost:8000/api/memories)
+
+          printf '%s' "$AGENT_MEMORY" | python -c             "import json,sys,os; d=json.load(sys.stdin); assert d['scope']=='AGENT'; assert d['agent_id']==os.environ['AGENT_ID']"
+
+          RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"memory_type":"TASK","scope":"RUN","run_id":os.environ["RUN_ID"],"content":"Prepare the current report in concise Markdown format.","importance":1.0}))')
+          RUN_MEMORY=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$RUN_PAYLOAD"             http://localhost:8000/api/memories)
+
+          RUN_MEMORY_ID=$(printf '%s' "$RUN_MEMORY" | python -c             "import json,sys,os; d=json.load(sys.stdin); assert d['scope']=='RUN'; assert d['run_id']==os.environ['RUN_ID']; print(d['id'])")
+          echo "RUN_MEMORY_ID=$RUN_MEMORY_ID" >> "$GITHUB_ENV"
+
+          SEARCH=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             "http://localhost:8000/api/memories/search?q=prepare%20report&run_id=$RUN_ID&limit=10")
+
+          printf '%s' "$SEARCH" | python -c             "import json,sys,os; d=json.load(sys.stdin); ids={x['id'] for x in d}; assert os.environ['USER_MEMORY_ID'] in ids; assert os.environ['RUN_MEMORY_ID'] in ids; assert all(x['status']=='ACTIVE' for x in d); assert all('score' in x for x in d)"
+
+      - name: Verify Memory deduplication and soft delete
+        run: |
+          DUPLICATE=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"memory_type":"LONG_TERM","scope":"USER","content":"Prepare concise Markdown reports for enterprise analysis.","importance":0.95,"metadata":{"dedup":"verified"}}'             http://localhost:8000/api/memories)
+
+          printf '%s' "$DUPLICATE" | python -c             "import json,sys,os; d=json.load(sys.stdin); assert d['id']==os.environ['USER_MEMORY_ID']; assert d['importance']==0.95; assert d['metadata']['dedup']=='verified'"
+
+          DELETED=$(curl --fail --silent --show-error             -X DELETE             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/memories/"$USER_MEMORY_ID")
+
+          printf '%s' "$DELETED" | python -c             "import json,sys; assert json.load(sys.stdin)['status']=='DELETED'"
+
+          ACTIVE=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/memories)
+          printf '%s' "$ACTIVE" | python -c             "import json,sys,os; d=json.load(sys.stdin); assert os.environ['USER_MEMORY_ID'] not in {x['id'] for x in d}"
+
+      - name: Verify Runtime injects relevant Memory before model call
         run: |
           STARTED=$(curl --fail --silent --show-error             -X POST             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$RUN_ID"/start)
+
+          printf '%s' "$STARTED" | python -c             "import json,sys,os; d=json.load(sys.stdin); assert d['status']=='FAILED'; assert d['attempt']==1; assert d['error_data']['code']=='provider_configuration'; steps=[s for s in d['steps'] if s['step_type']=='MODEL_CALL']; assert len(steps)==1; data=steps[0]['input_data']; assert data['memory_count'] >= 1; assert os.environ['RUN_MEMORY_ID'] in data['memory_ids']"
+
+      - name: Verify durable execution failure semantics
+        run: |
+          FAILURE_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["AGENT_ID"],"input":"Durable failure regression check.","additional_context":[],"max_attempts":2}))')
+          FAILURE_RUN=$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$FAILURE_PAYLOAD" http://localhost:8000/api/runs)
+          FAILURE_RUN_ID=$(printf '%s' "$FAILURE_RUN" | python -c "import json,sys; print(json.load(sys.stdin)['id'])")
+          STARTED=$(curl --fail --silent --show-error             -X POST             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$FAILURE_RUN_ID"/start)
 
           printf '%s' "$STARTED" | python -c             "import json,sys; d=json.load(sys.stdin); assert d['status']=='FAILED'; assert d['attempt']==1; assert d['error_data']['code']=='provider_configuration'; assert any(s['step_type']=='MODEL_CALL' and s['status']=='FAILED' for s in d['steps'])"
 
