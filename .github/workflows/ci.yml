@@ -89,6 +89,27 @@ jobs:
           TOKEN=$(curl --fail --silent --show-error             -H 'Content-Type: application/json'             -d '{"username":"ci-admin","password":"ci-admin-password-123"}'             http://localhost:8000/api/auth/login             | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
           echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
+      - name: Verify first-party MCP registry and discovery
+        run: |
+          SERVERS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/mcp/servers)
+
+          printf '%s' "$SERVERS" | python -c             "import json,sys; d=json.load(sys.stdin); by={x['name']:x for x in d}; assert {'knowledge','experiment','enterprise'} <= set(by); assert len(by['knowledge']['tools'])==2; assert len(by['experiment']['tools'])==3; assert len(by['enterprise']['tools'])==3; assert all(s['last_health_status']=='ok' for s in by.values()); assert all(t['skill_name'] for s in by.values() for t in s['tools']); assert all({'skill:execute','mcp:execute'} <= set(t['required_permissions']) for s in by.values() for t in s['tools'])"
+
+          KNOWLEDGE_ID=$(printf '%s' "$SERVERS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='knowledge'))")
+          EXPERIMENT_ID=$(printf '%s' "$SERVERS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='experiment'))")
+          ENTERPRISE_ID=$(printf '%s' "$SERVERS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='enterprise'))")
+
+          for SERVER_ID in "$KNOWLEDGE_ID" "$EXPERIMENT_ID" "$ENTERPRISE_ID"; do
+            HEALTH=$(curl --fail --silent --show-error               -X POST               -H "Authorization: Bearer $TOKEN"               http://localhost:8000/api/mcp/servers/"$SERVER_ID"/health)
+            printf '%s' "$HEALTH" | python -c               "import json,sys; d=json.load(sys.stdin); assert d['status']=='ok'; assert d['tool_count'] >= 2; assert d['latency_ms'] >= 0"
+          done
+
+      - name: Verify MCP domain permission mapping
+        run: |
+          SERVERS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/mcp/servers)
+
+          printf '%s' "$SERVERS" | python -c             "import json,sys; d=json.load(sys.stdin); by={x['name']:x for x in d}; kt={x['name']:x for x in by['knowledge']['tools']}; et={x['name']:x for x in by['experiment']['tools']}; ot={x['name']:x for x in by['enterprise']['tools']}; assert 'knowledge:read' in kt['search_documents']['required_permissions']; assert 'experiment:read' in et['search_experiments']['required_permissions']; assert 'experiment:create' in et['create_experiment']['required_permissions']; assert 'inventory:read' in ot['query_inventory']['required_permissions']; assert 'work_order:create' in ot['create_work_order']['required_permissions']; assert 'approval:submit' in ot['submit_approval']['required_permissions']; assert et['create_experiment']['side_effect']=='REVERSIBLE_WRITE'; assert ot['submit_approval']['side_effect']=='SENSITIVE'"
+
       - name: Verify first-party MCP discovery and policy mapping
         run: |
           SERVERS=$(curl --fail --silent --show-error \
@@ -186,13 +207,65 @@ jobs:
         run: |
           SKILLS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/skills)
 
-          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; expected={'system_echo','math_add','text_stats','workspace_list','workspace_read_text','workspace_write_text','artifact_publish','python_execute','memory_search','memory_write'}; assert expected <= names"
+          printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); names={item['name'] for item in data}; expected={'system_echo','math_add','text_stats','workspace_list','workspace_read_text','workspace_write_text','artifact_publish','python_execute','memory_search','memory_write','knowledge_search_documents','knowledge_get_document','experiment_search_experiments','experiment_get_experiment','experiment_create_experiment','enterprise_query_inventory','enterprise_create_work_order','enterprise_submit_approval'}; assert expected <= names"
 
           MATH_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; data=json.load(sys.stdin); print(next(item['id'] for item in data if item['name']=='math_add'))")
 
           EXECUTED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"left":2,"right":3}}'             http://localhost:8000/api/skills/"$MATH_ID"/execute)
 
           printf '%s' "$EXECUTED" | python -c             "import json,sys; data=json.load(sys.stdin)['result']; assert data['ok'] is True; assert data['output']['result'] == 5.0"
+
+      - name: Execute first-party MCP Skills through platform governance
+        run: |
+          SKILLS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/skills)
+
+          KNOWLEDGE_SKILL_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='knowledge_search_documents'))")
+          EXPERIMENT_SEARCH_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='experiment_search_experiments'))")
+          EXPERIMENT_CREATE_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='experiment_create_experiment'))")
+          INVENTORY_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='enterprise_query_inventory'))")
+          WORK_ORDER_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='enterprise_create_work_order'))")
+          APPROVAL_ID=$(printf '%s' "$SKILLS" | python -c             "import json,sys; d=json.load(sys.stdin); print(next(x['id'] for x in d if x['name']=='enterprise_submit_approval'))")
+
+          KNOWLEDGE=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"query":"perovskite","limit":5}}'             http://localhost:8000/api/skills/"$KNOWLEDGE_SKILL_ID"/execute)
+          printf '%s' "$KNOWLEDGE" | python -c             "import json,sys; r=json.load(sys.stdin)['result']; assert r['ok'] is True; assert r['output']['count'] >= 1; assert any(x['id']=='kb-perovskite-001' for x in r['output']['matches'])"
+
+          EXPERIMENTS=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"material":"perovskite","limit":10}}'             http://localhost:8000/api/skills/"$EXPERIMENT_SEARCH_ID"/execute)
+          printf '%s' "$EXPERIMENTS" | python -c             "import json,sys; r=json.load(sys.stdin)['result']; assert r['ok'] is True; assert r['output']['count'] >= 3"
+
+          CREATED_EXPERIMENT=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"title":"CI MCP candidate","material":"perovskite","objective":"Validate governed MCP write","parameters":{"annealing_c":108,"humidity_pct":30}}}'             http://localhost:8000/api/skills/"$EXPERIMENT_CREATE_ID"/execute)
+          printf '%s' "$CREATED_EXPERIMENT" | python -c             "import json,sys; r=json.load(sys.stdin)['result']; assert r['ok'] is True; assert r['output']['status']=='planned'; assert r['output']['material']=='perovskite'"
+
+          INVENTORY=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"material":"perovskite"}}'             http://localhost:8000/api/skills/"$INVENTORY_ID"/execute)
+          printf '%s' "$INVENTORY" | python -c             "import json,sys; r=json.load(sys.stdin)['result']; assert r['ok'] is True; assert r['output']['count'] >= 1"
+
+          WORK_ORDER=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"title":"CI MCP work order","description":"Validate enterprise connector write","priority":"high"}}'             http://localhost:8000/api/skills/"$WORK_ORDER_ID"/execute)
+          printf '%s' "$WORK_ORDER" | python -c             "import json,sys; r=json.load(sys.stdin)['result']; assert r['ok'] is True; assert r['output']['status']=='open'; assert r['output']['priority']=='high'"
+
+          APPROVAL=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{"arguments":{"subject":"CI MCP approval","reason":"Integration validation","requested_action":"create candidate experiment"}}'             http://localhost:8000/api/skills/"$APPROVAL_ID"/execute)
+          printf '%s' "$APPROVAL" | python -c             "import json,sys; r=json.load(sys.stdin)['result']; assert r['ok'] is True; assert r['output']['status']=='pending'"
+
+      - name: Verify MCP capabilities enter Context Engineering
+        run: |
+          CREATED=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d '{
+              "name":"ci-mcp-agent",
+              "description":"CI Phase 10 MCP context test",
+              "system_instructions":"Use approved enterprise capabilities when relevant.",
+              "model_provider":"deepseek",
+              "model_name":"deepseek-chat",
+              "temperature":0.2,
+              "context_policy":{"context_window_tokens":8192,"reserved_output_tokens":1024,"runtime_reserve_tokens":1024,"skill_tokens":2400,"skill_limit":3},
+              "skills":["knowledge_search_documents","experiment_search_experiments","enterprise_query_inventory"]
+            }'             http://localhost:8000/api/agents)
+
+          MCP_AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; d=json.load(sys.stdin); assert {'knowledge_search_documents','experiment_search_experiments','enterprise_query_inventory'} <= set(d['versions'][0]['skills']); print(d['id'])")
+
+          MCP_RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["MCP_AGENT_ID"],"input":"Search internal knowledge documents for perovskite thin-film guidance.","additional_context":[],"max_attempts":2}))' MCP_AGENT_ID="$MCP_AGENT_ID")
+          MCP_RUN=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$MCP_RUN_PAYLOAD"             http://localhost:8000/api/runs)
+
+          MCP_RUN_ID=$(printf '%s' "$MCP_RUN" | python -c             "import json,sys; print(json.load(sys.stdin)['id'])")
+
+          CONTEXT=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             http://localhost:8000/api/runs/"$MCP_RUN_ID"/context)
+          printf '%s' "$CONTEXT" | python -c             "import json,sys; d=json.load(sys.stdin); names=set(d['trace']['selected_skill_names']); assert 'knowledge_search_documents' in names; assert len(names) <= 3"
 
       - name: Create Agent with Workspace Skills
         run: |
