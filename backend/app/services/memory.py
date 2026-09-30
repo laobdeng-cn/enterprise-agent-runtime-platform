@@ -8,8 +8,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
+from app.db.session import async_session_maker
 from app.memory.contracts import (
-    MemoryMatch,
     MemoryScope,
     MemorySource,
     MemoryStatus,
@@ -537,19 +537,16 @@ class MemoryCapabilityService:
                     "Memory Skill cannot access another user's Run"
                 )
 
-            ranked = await memory_retriever.retrieve_for_run(
+            ranked = await memory_retriever.retrieve(
                 session,
-                run=run,
-                principal_id=principal_id,
+                owner_user_id=principal_id,
                 query=query,
+                agent_id=run.agent_id,
+                run_id=run.id,
+                memory_types=memory_types,
                 limit=limit,
+                track_access=True,
             )
-            if memory_types:
-                ranked = [
-                    item
-                    for item in ranked
-                    if MemoryType(item.memory.memory_type) in memory_types
-                ]
             await session.commit()
             return [
                 {
@@ -626,4 +623,9 @@ memory_writer = MemoryWriter()
 memory_retriever = MemoryRetriever(
     candidate_limit=settings.memory_search_candidate_limit,
     min_score=settings.memory_search_min_score,
+)
+
+
+memory_capabilities = MemoryCapabilityService(
+    session_factory=async_session_maker,
 )
