@@ -65,11 +65,11 @@ def memory_relevance_score(
     phrase = 1.0 if query.casefold().strip() in content.casefold() else 0.0
 
     score = (
-        coverage * 0.52
-        + jaccard * 0.12
+        coverage * 0.64
+        + jaccard * 0.18
         + phrase * 0.08
-        + importance * 0.16
-        + recency * 0.07
-        + scope_weight * 0.05
+        + importance * 0.04
+        + recency * 0.03
+        + scope_weight * 0.03
     )
     return min(1.0, max(0.0, score))
