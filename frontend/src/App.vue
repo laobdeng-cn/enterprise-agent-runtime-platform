@@ -148,6 +148,34 @@ interface MemoryRecord {
   score?: number;
 }
 
+interface MCPToolRecord {
+  id: string;
+  name: string;
+  description: string;
+  required_permissions: string[];
+  side_effect: string;
+  status: string;
+  skill_id: string | null;
+  skill_name: string | null;
+}
+
+interface MCPServerRecord {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  transport: string;
+  status: string;
+  trust_level: string;
+  timeout_seconds: number;
+  auth_mode: string;
+  last_health_status: string | null;
+  last_health_error: string | null;
+  last_health_at: string | null;
+  last_discovered_at: string | null;
+  tools: MCPToolRecord[];
+}
+
 interface ContextDecision {
   component_id: string;
   kind: "system" | "user" | "additional_context" | "memory" | "skill" | "tool_history";
@@ -213,7 +241,7 @@ interface SandboxResult {
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
-const version = ref("0.9.0");
+const version = ref("0.10.0");
 
 const username = ref("");
 const password = ref("");
@@ -251,6 +279,9 @@ const memoryContent = ref("");
 const memoryImportance = ref(0.7);
 const memoryLoading = ref(false);
 const memoryError = ref("");
+const mcpServers = ref<MCPServerRecord[]>([]);
+const mcpLoading = ref(false);
+const mcpError = ref("");
 const contextInspection = ref<ContextInspection | null>(null);
 const contextLoading = ref(false);
 const contextError = ref("");
@@ -297,6 +328,12 @@ const canWriteMemory = computed(
 );
 const canDeleteMemory = computed(
   () => currentUser.value?.permissions.includes("memory:delete") ?? false,
+);
+const canReadMcp = computed(
+  () => currentUser.value?.permissions.includes("mcp:read") ?? false,
+);
+const canManageMcp = computed(
+  () => currentUser.value?.permissions.includes("mcp:manage") ?? false,
 );
 
 function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -362,6 +399,63 @@ async function loadRuns(): Promise<void> {
   runs.value = (await response.json()) as RunRecord[];
 }
 
+async function loadMcpServers(): Promise<void> {
+  if (!currentUser.value || !canReadMcp.value) return;
+  mcpLoading.value = true;
+  mcpError.value = "";
+  try {
+    const response = await apiFetch("/api/mcp/servers");
+    if (!response.ok) {
+      mcpError.value = await response.text();
+      return;
+    }
+    mcpServers.value = (await response.json()) as MCPServerRecord[];
+  } catch {
+    mcpError.value = "MCP registry API is unavailable.";
+  } finally {
+    mcpLoading.value = false;
+  }
+}
+
+async function checkMcpHealth(server: MCPServerRecord): Promise<void> {
+  mcpLoading.value = true;
+  mcpError.value = "";
+  try {
+    const response = await apiFetch(`/api/mcp/servers/${server.id}/health`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      mcpError.value = await response.text();
+      return;
+    }
+    await loadMcpServers();
+  } catch {
+    mcpError.value = "MCP health check failed.";
+  } finally {
+    mcpLoading.value = false;
+  }
+}
+
+async function discoverMcp(server: MCPServerRecord): Promise<void> {
+  if (!canManageMcp.value) return;
+  mcpLoading.value = true;
+  mcpError.value = "";
+  try {
+    const response = await apiFetch(`/api/mcp/servers/${server.id}/discover`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      mcpError.value = await response.text();
+      return;
+    }
+    await Promise.all([loadMcpServers(), loadSkills()]);
+  } catch {
+    mcpError.value = "MCP discovery failed.";
+  } finally {
+    mcpLoading.value = false;
+  }
+}
+
 async function login(): Promise<void> {
   authError.value = "";
   authLoading.value = true;
@@ -383,7 +477,13 @@ async function login(): Promise<void> {
     sessionStorage.setItem("earp_access_token", payload.access_token);
     password.value = "";
     await loadCurrentUser();
-    await Promise.all([loadAgents(), loadSkills(), loadRuns(), loadMemories()]);
+    await Promise.all([
+      loadAgents(),
+      loadSkills(),
+      loadRuns(),
+      loadMemories(),
+      loadMcpServers(),
+    ]);
   } catch {
     authError.value = "Authentication service is unavailable.";
   } finally {
@@ -667,6 +767,8 @@ function logout(): void {
   memoryQuery.value = "";
   memoryContent.value = "";
   memoryError.value = "";
+  mcpServers.value = [];
+  mcpError.value = "";
   contextInspection.value = null;
   contextError.value = "";
   sessionStorage.removeItem("earp_access_token");
@@ -681,6 +783,7 @@ onMounted(async () => {
     loadRuns(),
     loadSandboxHealth(),
     loadMemories(),
+    loadMcpServers(),
   ]);
 });
 </script>
@@ -690,15 +793,15 @@ onMounted(async () => {
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Context Engineering Pipeline</h1>
+        <h1>MCP + Enterprise Data</h1>
         <p class="subtitle">
-          Phase 9 adds token budgeting, relevance-based Skill selection, bounded Memory
-          and additional-context compression, runtime tool-history control, and an
-          inspectable inclusion/exclusion trace for every Run.
+          Phase 10 adds a durable MCP server registry, current Streamable HTTP discovery,
+          permission-mapped MCP Skills, and first-party knowledge, experiment, inventory,
+          work-order, and enterprise approval integrations.
         </p>
       </div>
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 9 · v{{ version }}
+        Phase 10 · v{{ version }}
       </el-tag>
     </section>
 
@@ -900,6 +1003,85 @@ onMounted(async () => {
               Save Memory
             </el-button>
           </el-form>
+        </div>
+      </div>
+    </el-card>
+
+    <el-card
+      v-if="currentUser && canReadMcp"
+      class="status-card result-block"
+      shadow="never"
+    >
+      <template #header>
+        <div class="card-header">
+          <strong>MCP Server Registry</strong>
+          <el-button text type="primary" :loading="mcpLoading" @click="loadMcpServers">
+            Reload
+          </el-button>
+        </div>
+      </template>
+
+      <el-alert
+        v-if="mcpError"
+        :title="mcpError"
+        type="error"
+        :closable="false"
+        class="result-block"
+      />
+
+      <div class="agent-grid">
+        <div v-for="server in mcpServers" :key="server.id" class="status-item">
+          <div>
+            <div class="tag-list">
+              <el-tag :type="server.last_health_status === 'ok' ? 'success' : 'warning'">
+                {{ server.last_health_status || "unknown" }}
+              </el-tag>
+              <el-tag type="info">{{ server.transport }}</el-tag>
+              <el-tag type="info">{{ server.trust_level }}</el-tag>
+              <el-tag type="success">{{ server.tools.length }} tool(s)</el-tag>
+            </div>
+            <p><strong>{{ server.name }}</strong></p>
+            <p class="muted">{{ server.description }}</p>
+            <p class="muted">{{ server.url }}</p>
+
+            <div
+              v-for="tool in server.tools"
+              :key="tool.id"
+              class="result-block"
+            >
+              <div class="tag-list">
+                <el-tag>{{ tool.name }}</el-tag>
+                <el-tag type="info">{{ tool.side_effect }}</el-tag>
+                <el-tag v-if="tool.skill_name" type="success">
+                  {{ tool.skill_name }}
+                </el-tag>
+              </div>
+              <p class="muted">
+                {{ tool.required_permissions.join(" · ") }}
+              </p>
+            </div>
+          </div>
+
+          <div class="tag-list">
+            <el-button
+              size="small"
+              plain
+              :loading="mcpLoading"
+              @click="checkMcpHealth(server)"
+            >
+              Health
+            </el-button>
+            <el-button
+              v-if="canManageMcp"
+              size="small"
+              type="primary"
+              plain
+              :loading="mcpLoading"
+              @click="discoverMcp(server)"
+            >
+              Rediscover
+            </el-button>
+          </div>
         </div>
       </div>
     </el-card>
