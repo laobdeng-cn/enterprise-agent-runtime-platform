@@ -1,103 +1,116 @@
 import asyncio
-from typing import Any
+import logging
 
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.session import async_session_maker, engine
 from app.models.mcp import MCPServer
+from app.services.mcp import discover_mcp_server
 
-FIRST_PARTY_SERVERS: dict[str, dict[str, Any]] = {
-    "knowledge": {
-        "description": "Internal knowledge and engineering-document MCP server.",
-        "endpoint_url": settings.mcp_knowledge_url,
-        "permission_mapping": {
-            "search_documents": {
-                "required_permissions": ["knowledge:read"],
-                "side_effect": "READ_ONLY",
+logger = logging.getLogger(__name__)
+
+FIRST_PARTY_SERVERS = [
+    {
+        "name": "knowledge",
+        "description": "Approved internal knowledge search and document access.",
+        "url": settings.mcp_knowledge_url,
+        "config": {
+            "skill_prefix": "knowledge",
+            "permission_map": {
+                "search_documents": ["knowledge:read"],
+                "get_document": ["knowledge:read"],
             },
-            "get_document": {
-                "required_permissions": ["knowledge:read"],
-                "side_effect": "READ_ONLY",
-            },
-        },
-    },
-    "experiment": {
-        "description": "R&D experiment-record MCP server.",
-        "endpoint_url": settings.mcp_experiment_url,
-        "permission_mapping": {
-            "search_experiments": {
-                "required_permissions": ["experiment:read"],
-                "side_effect": "READ_ONLY",
-            },
-            "get_experiment": {
-                "required_permissions": ["experiment:read"],
-                "side_effect": "READ_ONLY",
-            },
-            "create_experiment": {
-                "required_permissions": ["experiment:create"],
-                "side_effect": "REVERSIBLE_WRITE",
+            "side_effect_map": {
+                "search_documents": "READ_ONLY",
+                "get_document": "READ_ONLY",
             },
         },
     },
-    "enterprise": {
-        "description": "Enterprise inventory and work-order MCP server.",
-        "endpoint_url": settings.mcp_enterprise_url,
-        "permission_mapping": {
-            "query_inventory": {
-                "required_permissions": ["inventory:read"],
-                "side_effect": "READ_ONLY",
+    {
+        "name": "experiment",
+        "description": "Authorized R&D experiment data and candidate creation.",
+        "url": settings.mcp_experiment_url,
+        "config": {
+            "skill_prefix": "experiment",
+            "permission_map": {
+                "search_experiments": ["experiment:read"],
+                "get_experiment": ["experiment:read"],
+                "create_experiment": ["experiment:create"],
             },
-            "create_work_order": {
-                "required_permissions": ["work_order:create"],
-                "side_effect": "IRREVERSIBLE_WRITE",
-            },
-            "submit_approval": {
-                "required_permissions": ["approval:submit"],
-                "side_effect": "SENSITIVE",
+            "side_effect_map": {
+                "search_experiments": "READ_ONLY",
+                "get_experiment": "READ_ONLY",
+                "create_experiment": "REVERSIBLE_WRITE",
             },
         },
     },
-}
+    {
+        "name": "enterprise",
+        "description": "Enterprise inventory, work-order, and approval integrations.",
+        "url": settings.mcp_enterprise_url,
+        "config": {
+            "skill_prefix": "enterprise",
+            "permission_map": {
+                "query_inventory": ["inventory:read"],
+                "create_work_order": ["work_order:create"],
+                "submit_approval": ["approval:submit"],
+            },
+            "side_effect_map": {
+                "query_inventory": "READ_ONLY",
+                "create_work_order": "REVERSIBLE_WRITE",
+                "submit_approval": "SENSITIVE",
+            },
+        },
+    },
+]
 
 
 async def seed() -> None:
     async with async_session_maker() as session:
         result = await session.execute(select(MCPServer))
-        existing = {
-            server.name: server
-            for server in result.scalars().all()
-        }
+        existing = {item.name: item for item in result.scalars().all()}
 
-        for name, definition in FIRST_PARTY_SERVERS.items():
-            server = existing.get(name)
+        server_ids = []
+        for definition in FIRST_PARTY_SERVERS:
+            server = existing.get(definition["name"])
             if server is None:
                 server = MCPServer(
-                    name=name,
-                    description=str(definition["description"]),
-                    transport="HTTP_JSONRPC",
-                    endpoint_url=str(definition["endpoint_url"]),
+                    name=definition["name"],
+                    description=definition["description"],
+                    url=definition["url"],
+                    transport="streamable_http",
                     status="active",
-                    trust_level="internal",
-                    permission_mapping=dict(
-                        definition["permission_mapping"]
-                    ),
-                    tool_cache=[],
-                    server_info={},
-                    last_health_status="unknown",
+                    trust_level="first_party",
+                    timeout_seconds=settings.mcp_timeout_seconds,
+                    auth_mode="none",
+                    config=definition["config"],
                 )
                 session.add(server)
+                await session.flush()
             else:
-                server.description = str(definition["description"])
-                server.transport = "HTTP_JSONRPC"
-                server.endpoint_url = str(definition["endpoint_url"])
+                server.description = definition["description"]
+                server.url = definition["url"]
+                server.transport = "streamable_http"
                 server.status = "active"
-                server.trust_level = "internal"
-                server.permission_mapping = dict(
-                    definition["permission_mapping"]
-                )
+                server.trust_level = "first_party"
+                server.timeout_seconds = settings.mcp_timeout_seconds
+                server.auth_mode = "none"
+                server.secret_ref = None
+                server.config = definition["config"]
+            server_ids.append(server.id)
 
         await session.commit()
+
+        for server_id in server_ids:
+            try:
+                await discover_mcp_server(session, server_id)
+            except Exception:
+                logger.exception(
+                    "First-party MCP discovery failed for %s; "
+                    "registry seed remains available for manual rediscovery",
+                    server_id,
+                )
 
 
 async def main() -> None:

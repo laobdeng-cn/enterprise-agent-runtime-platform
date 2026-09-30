@@ -58,13 +58,73 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  knowledge-mcp:
+    build:
+      context: ./mcp_servers
+    command: ["uvicorn", "knowledge_server.app:app", "--host", "0.0.0.0", "--port", "8101"]
+    ports:
+      - "${MCP_KNOWLEDGE_PORT:-8101}:8101"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8101/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+    restart: unless-stopped
+
+  experiment-mcp:
+    build:
+      context: ./mcp_servers
+    command: ["uvicorn", "experiment_server.app:app", "--host", "0.0.0.0", "--port", "8102"]
+    ports:
+      - "${MCP_EXPERIMENT_PORT:-8102}:8102"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8102/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+    restart: unless-stopped
+
+  enterprise-mcp:
+    build:
+      context: ./mcp_servers
+    command: ["uvicorn", "enterprise_server.app:app", "--host", "0.0.0.0", "--port", "8103"]
+    ports:
+      - "${MCP_ENTERPRISE_PORT:-8103}:8103"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8103/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
     environment:
       APP_ENV: ${APP_ENV:-development}
       APP_NAME: enterprise-agent-runtime-platform
-      APP_VERSION: 0.9.0
+      APP_VERSION: 0.10.0
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent}@postgres:5432/${POSTGRES_DB:-agent_runtime}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-development-only-change-me}
@@ -104,6 +164,10 @@ services:
       CONTEXT_SKILL_LIMIT: ${CONTEXT_SKILL_LIMIT:-8}
       CONTEXT_ITEM_MAX_TOKENS: ${CONTEXT_ITEM_MAX_TOKENS:-2048}
       CONTEXT_FALLBACK_SKILL_COUNT: ${CONTEXT_FALLBACK_SKILL_COUNT:-3}
+      MCP_KNOWLEDGE_URL: ${MCP_KNOWLEDGE_URL:-http://knowledge-mcp:8101/mcp}
+      MCP_EXPERIMENT_URL: ${MCP_EXPERIMENT_URL:-http://experiment-mcp:8102/mcp}
+      MCP_ENTERPRISE_URL: ${MCP_ENTERPRISE_URL:-http://enterprise-mcp:8103/mcp}
+      MCP_TIMEOUT_SECONDS: ${MCP_TIMEOUT_SECONDS:-20}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -115,6 +179,12 @@ services:
       redis:
         condition: service_healthy
       docker:
+        condition: service_healthy
+      knowledge-mcp:
+        condition: service_healthy
+      experiment-mcp:
+        condition: service_healthy
+      enterprise-mcp:
         condition: service_healthy
     healthcheck:
       test:
