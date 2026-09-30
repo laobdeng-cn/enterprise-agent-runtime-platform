@@ -71,7 +71,10 @@ class WorkflowVersion(Base):
         default=uuid.uuid4,
     )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     input_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
@@ -109,7 +112,10 @@ class WorkflowNode(Base):
         default=uuid.uuid4,
     )
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("workflow_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("workflow_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     node_key: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -136,10 +142,16 @@ class WorkflowRun(Base):
         default=uuid.uuid4,
     )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("workflows.id", ondelete="RESTRICT"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     workflow_version_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("workflow_versions.id", ondelete="RESTRICT"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("workflow_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -246,7 +258,10 @@ class WorkflowCheckpoint(Base):
         default=uuid.uuid4,
     )
     workflow_run_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("workflow_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
