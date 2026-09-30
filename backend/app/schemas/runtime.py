@@ -9,6 +9,7 @@ from app.agents.harness.contracts import ContextTrace
 
 class RunCreate(BaseModel):
     agent_id: UUID
+    agent_version_id: UUID | None = None
     input: str = Field(min_length=1, max_length=100000)
     additional_context: list[str] = Field(default_factory=list, max_length=20)
     max_attempts: int = Field(default=2, ge=1, le=5)
