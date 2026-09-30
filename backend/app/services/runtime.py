@@ -7,7 +7,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agents.harness.contracts import HarnessResult, MemoryContextItem
+from app.agents.harness.contracts import (
+    ContextTrace,
+    HarnessResult,
+    MemoryContextItem,
+)
 from app.agents.harness.errors import ProviderError
 from app.agents.harness.runner import AgentHarness
 from app.core.config import settings
@@ -168,6 +172,77 @@ async def get_run(
     if principal is not None:
         _assert_access(run, principal)
     return run
+
+
+async def inspect_run_context(
+    session: AsyncSession,
+    harness: AgentHarness,
+    run_id: UUID,
+    *,
+    principal: User,
+) -> tuple[str, ContextTrace]:
+    run = await get_run(
+        session,
+        run_id,
+        principal=principal,
+    )
+
+    model_steps = [
+        step
+        for step in run.steps
+        if step.step_type == "MODEL_CALL"
+    ]
+    for step in sorted(
+        model_steps,
+        key=lambda item: item.sequence,
+        reverse=True,
+    ):
+        raw_trace = step.input_data.get("context_trace")
+        if isinstance(raw_trace, dict):
+            return "persisted", ContextTrace.model_validate(raw_trace)
+
+    version = await _load_agent_version(
+        session,
+        run.agent_version_id,
+    )
+    execution_principal = await get_user_by_id(
+        session,
+        run.created_by_user_id,
+    )
+    if execution_principal is None or not execution_principal.is_active:
+        raise RunExecutionError(
+            "Run creator is unavailable or inactive"
+        )
+
+    ranked_memories = await memory_retriever.retrieve(
+        session,
+        owner_user_id=execution_principal.id,
+        query=run.input_text,
+        agent_id=run.agent_id,
+        run_id=run.id,
+        limit=settings.memory_context_limit,
+        track_access=False,
+    )
+    relevant_memory = [
+        MemoryContextItem(
+            id=item.memory.id,
+            memory_type=item.memory.memory_type,
+            scope=item.memory.scope,
+            content=item.memory.content,
+            score=item.score,
+            importance=item.memory.importance,
+            source=item.memory.source,
+        )
+        for item in ranked_memories
+    ]
+    package = harness.prepare_context(
+        version=version,
+        user_input=run.input_text,
+        additional_context=list(run.additional_context),
+        relevant_memory=relevant_memory,
+        granted_permissions=permission_codes(execution_principal),
+    )
+    return "preview", package.trace
 
 
 async def list_runs(
@@ -557,20 +632,59 @@ async def execute_run(
                 )
                 for item in ranked_memories
             ]
+            granted_permissions = permission_codes(execution_principal)
+            prepared_context = harness.prepare_context(
+                version=version,
+                user_input=run.input_text,
+                additional_context=list(run.additional_context),
+                relevant_memory=relevant_memory,
+                granted_permissions=granted_permissions,
+            )
 
-            persisted_memory_step = await session.get(
+            persisted_context_step = await session.get(
                 RunStep,
                 model_step.id,
             )
-            if persisted_memory_step is not None:
-                persisted_memory_step.input_data = {
-                    **persisted_memory_step.input_data,
+            if persisted_context_step is not None:
+                persisted_context_step.input_data = {
+                    **persisted_context_step.input_data,
                     "memory_ids": [
                         str(item.id)
-                        for item in relevant_memory
+                        for item in prepared_context.relevant_memory
                     ],
-                    "memory_count": len(relevant_memory),
+                    "memory_count": len(
+                        prepared_context.relevant_memory
+                    ),
+                    "selected_skill_names": (
+                        prepared_context.selected_skill_names
+                    ),
+                    "context_trace": prepared_context.trace.model_dump(
+                        mode="json"
+                    ),
                 }
+            await _append_event(
+                session,
+                run,
+                "run.context_prepared",
+                {
+                    "attempt": run.attempt,
+                    "used_tokens": (
+                        prepared_context.trace.budget.used_tokens
+                    ),
+                    "initial_budget_tokens": (
+                        prepared_context.trace.budget.initial_budget_tokens
+                    ),
+                    "memory_count": len(
+                        prepared_context.relevant_memory
+                    ),
+                    "selected_skill_count": len(
+                        prepared_context.selected_skill_names
+                    ),
+                    "compression_count": (
+                        prepared_context.trace.compression_count
+                    ),
+                },
+            )
             await session.commit()
 
             result = await harness.run(
@@ -578,12 +692,13 @@ async def execute_run(
                 version=version,
                 user_input=run.input_text,
                 additional_context=list(run.additional_context),
-                granted_permissions=permission_codes(execution_principal),
+                granted_permissions=granted_permissions,
                 skill_context=SkillExecutionContext(
                     run_id=run.id,
                     principal_id=execution_principal.id,
                 ),
                 relevant_memory=relevant_memory,
+                prepared_context=prepared_context,
             )
         except Exception as exc:
             error = _normalize_error(exc)
