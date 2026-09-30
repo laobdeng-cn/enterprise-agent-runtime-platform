@@ -5,6 +5,7 @@ from uuid import UUID
 from app.agents.harness.context import ContextBuilder
 from app.agents.harness.contracts import (
     HarnessResult,
+    MemoryContextItem,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -49,11 +50,13 @@ class AgentHarness:
         additional_context: list[str] | None = None,
         granted_permissions: set[str] | None = None,
         skill_context: SkillExecutionContext | None = None,
+        relevant_memory: list[MemoryContextItem] | None = None,
     ) -> HarnessResult:
         context_package = self.context_builder.build(
             system_instructions=version.system_instructions,
             user_input=user_input,
             additional_context=additional_context,
+            relevant_memory=relevant_memory,
         )
         messages = context_package.to_messages()
         tools = self._tool_definitions(version)
@@ -103,6 +106,11 @@ class AgentHarness:
                         "response_id": response.response_id,
                         "response_ids": response_ids,
                         "tool_rounds": tool_round,
+                        "memory_ids": [
+                            str(item.id)
+                            for item in (relevant_memory or [])
+                        ],
+                        "memory_count": len(relevant_memory or []),
                     },
                 )
 
