@@ -126,6 +126,28 @@ interface SandboxHealth {
   };
 }
 
+interface MemoryRecord {
+  id: string;
+  owner_user_id: string;
+  agent_id: string | null;
+  run_id: string | null;
+  memory_type: "CONVERSATION" | "TASK" | "LONG_TERM" | "SEMANTIC";
+  scope: "USER" | "AGENT" | "RUN";
+  status: "ACTIVE" | "ARCHIVED" | "DELETED";
+  label: string | null;
+  content: string;
+  metadata: Record<string, unknown>;
+  source: string;
+  source_ref: string | null;
+  importance: number;
+  expires_at: string | null;
+  access_count: number;
+  last_accessed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  score?: number;
+}
+
 interface SandboxResult {
   execution_id: string;
   run_id: string;
@@ -150,7 +172,7 @@ interface SandboxResult {
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
-const version = ref("0.7.0");
+const version = ref("0.8.0");
 
 const username = ref("");
 const password = ref("");
@@ -180,6 +202,14 @@ const sandboxCode = ref(
 );
 const sandboxResult = ref<SandboxResult | null>(null);
 const sandboxLoading = ref(false);
+const memories = ref<MemoryRecord[]>([]);
+const memoryQuery = ref("");
+const memoryType = ref<MemoryRecord["memory_type"]>("LONG_TERM");
+const memoryScope = ref<MemoryRecord["scope"]>("USER");
+const memoryContent = ref("");
+const memoryImportance = ref(0.7);
+const memoryLoading = ref(false);
+const memoryError = ref("");
 
 const overallType = computed(() => {
   if (backend.value === "checking") return "info";
@@ -214,6 +244,15 @@ const canReadArtifacts = computed(
 );
 const canExecuteSandbox = computed(
   () => currentUser.value?.permissions.includes("sandbox:execute") ?? false,
+);
+const canReadMemory = computed(
+  () => currentUser.value?.permissions.includes("memory:read") ?? false,
+);
+const canWriteMemory = computed(
+  () => currentUser.value?.permissions.includes("memory:write") ?? false,
+);
+const canDeleteMemory = computed(
+  () => currentUser.value?.permissions.includes("memory:delete") ?? false,
 );
 
 function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -300,11 +339,110 @@ async function login(): Promise<void> {
     sessionStorage.setItem("earp_access_token", payload.access_token);
     password.value = "";
     await loadCurrentUser();
-    await Promise.all([loadAgents(), loadSkills(), loadRuns()]);
+    await Promise.all([loadAgents(), loadSkills(), loadRuns(), loadMemories()]);
   } catch {
     authError.value = "Authentication service is unavailable.";
   } finally {
     authLoading.value = false;
+  }
+}
+
+async function loadMemories(): Promise<void> {
+  if (!currentUser.value || !canReadMemory.value) return;
+
+  memoryLoading.value = true;
+  memoryError.value = "";
+  try {
+    const query = memoryQuery.value.trim();
+    let path = "/api/memories";
+    if (query) {
+      const params = new URLSearchParams({ q: query, limit: "50" });
+      if (selectedRunId.value) {
+        params.set("run_id", selectedRunId.value);
+      } else if (selectedAgentId.value) {
+        params.set("agent_id", selectedAgentId.value);
+      }
+      path = `/api/memories/search?${params.toString()}`;
+    }
+
+    const response = await apiFetch(path);
+    if (!response.ok) {
+      memoryError.value = await response.text();
+      return;
+    }
+    memories.value = (await response.json()) as MemoryRecord[];
+  } catch {
+    memoryError.value = "Memory API is unavailable.";
+  } finally {
+    memoryLoading.value = false;
+  }
+}
+
+async function createMemory(): Promise<void> {
+  if (!memoryContent.value.trim() || !canWriteMemory.value) return;
+
+  const payload: Record<string, unknown> = {
+    memory_type: memoryType.value,
+    scope: memoryScope.value,
+    content: memoryContent.value.trim(),
+    importance: memoryImportance.value,
+    metadata: { created_from: "memory-inspector" },
+  };
+
+  if (memoryScope.value === "AGENT") {
+    if (!selectedAgentId.value) {
+      memoryError.value = "Select an Agent before creating AGENT-scoped Memory.";
+      return;
+    }
+    payload.agent_id = selectedAgentId.value;
+  }
+
+  if (memoryScope.value === "RUN") {
+    if (!selectedRunId.value) {
+      memoryError.value = "Open a Run workspace before creating RUN-scoped Memory.";
+      return;
+    }
+    payload.run_id = selectedRunId.value;
+  }
+
+  memoryLoading.value = true;
+  memoryError.value = "";
+  try {
+    const response = await apiFetch("/api/memories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      memoryError.value = await response.text();
+      return;
+    }
+    memoryContent.value = "";
+    await loadMemories();
+  } catch {
+    memoryError.value = "Memory create failed.";
+  } finally {
+    memoryLoading.value = false;
+  }
+}
+
+async function deleteMemory(memory: MemoryRecord): Promise<void> {
+  if (!canDeleteMemory.value) return;
+  memoryLoading.value = true;
+  memoryError.value = "";
+  try {
+    const response = await apiFetch(`/api/memories/${memory.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      memoryError.value = await response.text();
+      return;
+    }
+    await loadMemories();
+  } catch {
+    memoryError.value = "Memory delete failed.";
+  } finally {
+    memoryLoading.value = false;
   }
 }
 
@@ -459,13 +597,23 @@ function logout(): void {
   artifacts.value = [];
   sandboxHealth.value = null;
   sandboxResult.value = null;
+  memories.value = [];
+  memoryQuery.value = "";
+  memoryContent.value = "";
+  memoryError.value = "";
   sessionStorage.removeItem("earp_access_token");
 }
 
 onMounted(async () => {
   await refreshHealth();
   await loadCurrentUser();
-  await Promise.all([loadAgents(), loadSkills(), loadRuns(), loadSandboxHealth()]);
+  await Promise.all([
+    loadAgents(),
+    loadSkills(),
+    loadRuns(),
+    loadSandboxHealth(),
+    loadMemories(),
+  ]);
 });
 </script>
 
@@ -474,15 +622,15 @@ onMounted(async () => {
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Docker Sandbox Runtime</h1>
+        <h1>Durable Memory System</h1>
         <p class="subtitle">
-          Phase 7 executes Python inside short-lived isolated containers with default-deny
-          networking, resource limits, Run-scoped read-only mounts, bounded output, and
-          automatic Artifact registration.
+          Phase 8 adds scoped Conversation, Task, Long-term, and Semantic Memory with
+          explicit retention, relevance retrieval, governed Agent writes, and safe
+          context injection.
         </p>
       </div>
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 7 · v{{ version }}
+        Phase 8 · v{{ version }}
       </el-tag>
     </section>
 
@@ -549,19 +697,142 @@ onMounted(async () => {
       </el-card>
 
       <el-card shadow="never">
-        <template #header><strong>Sandbox boundary</strong></template>
+        <template #header><strong>Memory boundary</strong></template>
         <div class="flow">
-          <span>Run Workspace</span><span>→</span><span>Ephemeral Container</span><span>→</span>
-          <span>Validated Artifacts</span>
+          <span>USER</span><span>→</span><span>AGENT</span><span>→</span><span>RUN</span>
         </div>
         <p class="muted">
-          {{ sandboxHealth?.available ? "Docker sandbox available" : "Sandbox health pending" }}
-          · network {{ sandboxHealth?.security.network_mode ?? "none" }}
-          · root FS {{ sandboxHealth?.security.read_only ? "read-only" : "policy-managed" }}
-          · user {{ sandboxHealth?.security.user ?? "65534:65534" }}
+          Conversation history is not automatically Memory. Durable Memory is explicit,
+          scoped, permission-gated, expiry-aware, and injected as untrusted contextual data.
         </p>
       </el-card>
     </section>
+
+    <el-card
+      v-if="currentUser && canReadMemory"
+      class="status-card result-block"
+      shadow="never"
+    >
+      <template #header>
+        <div class="card-header">
+          <strong>Memory Inspector</strong>
+          <div class="tag-list">
+            <el-tag type="info">Conversation</el-tag>
+            <el-tag type="info">Task</el-tag>
+            <el-tag type="info">Long-term</el-tag>
+            <el-tag type="info">Semantic</el-tag>
+          </div>
+        </div>
+      </template>
+
+      <el-alert
+        v-if="memoryError"
+        :title="memoryError"
+        type="error"
+        :closable="false"
+        class="result-block"
+      />
+
+      <div class="agent-grid">
+        <div>
+          <el-form label-position="top">
+            <el-form-item label="Search relevant Memory">
+              <el-input
+                v-model="memoryQuery"
+                placeholder="Search by current user / selected Agent / opened Run"
+                clearable
+                @keyup.enter="loadMemories"
+              />
+            </el-form-item>
+            <div class="tag-list">
+              <el-button
+                type="primary"
+                plain
+                :loading="memoryLoading"
+                @click="loadMemories"
+              >
+                Search / Reload
+              </el-button>
+              <el-tag type="info">{{ memories.length }} result(s)</el-tag>
+            </div>
+          </el-form>
+
+          <div v-for="memory in memories" :key="memory.id" class="status-item result-block">
+            <div>
+              <div class="tag-list">
+                <el-tag>{{ memory.memory_type }}</el-tag>
+                <el-tag type="info">{{ memory.scope }}</el-tag>
+                <el-tag type="success">{{ memory.status }}</el-tag>
+                <el-tag v-if="memory.score !== undefined" type="warning">
+                  score {{ memory.score.toFixed(3) }}
+                </el-tag>
+              </div>
+              <p><strong>{{ memory.label || "Memory" }}</strong></p>
+              <p>{{ memory.content }}</p>
+              <p class="muted">
+                importance {{ memory.importance.toFixed(2) }} · source {{ memory.source }}
+                · accessed {{ memory.access_count }} time(s)
+              </p>
+            </div>
+            <el-button
+              v-if="canDeleteMemory"
+              size="small"
+              type="danger"
+              plain
+              @click="deleteMemory(memory)"
+            >
+              Delete
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="canWriteMemory">
+          <h3>Create explicit Memory</h3>
+          <el-form label-position="top">
+            <el-form-item label="Type">
+              <el-select v-model="memoryType">
+                <el-option label="Conversation" value="CONVERSATION" />
+                <el-option label="Task" value="TASK" />
+                <el-option label="Long-term" value="LONG_TERM" />
+                <el-option label="Semantic" value="SEMANTIC" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="Scope">
+              <el-select v-model="memoryScope">
+                <el-option label="User" value="USER" />
+                <el-option label="Agent" value="AGENT" />
+                <el-option label="Run" value="RUN" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="Importance">
+              <el-slider
+                v-model="memoryImportance"
+                :min="0"
+                :max="1"
+                :step="0.05"
+                show-input
+              />
+            </el-form-item>
+            <el-form-item label="Content">
+              <el-input
+                v-model="memoryContent"
+                type="textarea"
+                :rows="5"
+                placeholder="Persist only information worth retaining."
+              />
+            </el-form-item>
+            <el-button
+              type="primary"
+              :loading="memoryLoading"
+              :disabled="!memoryContent.trim()"
+              @click="createMemory"
+            >
+              Save Memory
+            </el-button>
+          </el-form>
+        </div>
+      </div>
+    </el-card>
 
     <section v-if="currentUser && canCreateRuns" class="agent-grid">
       <el-card shadow="never">
