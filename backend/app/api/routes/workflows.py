@@ -75,6 +75,7 @@ def to_workflow_response(workflow: Workflow) -> WorkflowResponse:
                         name=node.name,
                         role=node.role,
                         agent_id=node.agent_id,
+                        agent_version_id=node.agent_version_id,
                         depends_on=list(node.depends_on),
                         condition=dict(node.condition),
                         instructions=node.instructions,
