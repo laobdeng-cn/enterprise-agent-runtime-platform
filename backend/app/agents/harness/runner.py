@@ -4,12 +4,14 @@ from uuid import UUID
 
 from app.agents.harness.context import ContextBuilder
 from app.agents.harness.contracts import (
+    ContextPackage,
     HarnessResult,
     MemoryContextItem,
     ModelMessage,
     ModelRequest,
     ModelResponse,
     ModelToolDefinition,
+    SkillContextItem,
     TokenUsage,
 )
 from app.agents.harness.errors import HarnessError
@@ -51,15 +53,26 @@ class AgentHarness:
         granted_permissions: set[str] | None = None,
         skill_context: SkillExecutionContext | None = None,
         relevant_memory: list[MemoryContextItem] | None = None,
+        prepared_context: ContextPackage | None = None,
     ) -> HarnessResult:
-        context_package = self.context_builder.build(
-            system_instructions=version.system_instructions,
+        context_package = prepared_context or self.prepare_context(
+            version=version,
             user_input=user_input,
             additional_context=additional_context,
             relevant_memory=relevant_memory,
+            granted_permissions=granted_permissions,
         )
         messages = context_package.to_messages()
-        tools = self._tool_definitions(version)
+        selected_names = set(context_package.selected_skill_names)
+        selected_bound_versions = [
+            skill_version
+            for skill_version in version.bound_skill_versions
+            if skill_version.skill.name in selected_names
+        ]
+        tools = self._tool_definitions(
+            version,
+            selected_names=selected_names,
+        )
         lifecycle_context = HarnessLifecycleContext(
             agent_id=agent_id,
             agent_version_id=version.id,
@@ -72,11 +85,21 @@ class AgentHarness:
         total_usage = TokenUsage()
         tool_results: list[dict[str, object]] = []
         response_ids: list[str] = []
+        runtime_context_rounds: list[dict[str, int]] = []
 
         for tool_round in range(self.max_tool_rounds + 1):
+            request_messages, runtime_fit = self.context_builder.fit_runtime_messages(
+                messages=messages,
+                tools=tools,
+                input_budget_tokens=(
+                    context_package.trace.budget.input_budget_tokens
+                ),
+            )
+            runtime_fit["round"] = tool_round
+            runtime_context_rounds.append(runtime_fit)
             request = ModelRequest(
                 model=version.model_name,
-                messages=messages,
+                messages=request_messages,
                 temperature=version.temperature,
                 max_tokens=version.max_tokens,
                 tools=tools,
@@ -110,7 +133,16 @@ class AgentHarness:
                             str(item.id)
                             for item in (relevant_memory or [])
                         ],
-                        "memory_count": len(relevant_memory or []),
+                        "memory_count": len(
+                            context_package.relevant_memory
+                        ),
+                        "context_trace": context_package.trace.model_dump(
+                            mode="json"
+                        ),
+                        "context_runtime_rounds": runtime_context_rounds,
+                        "selected_skill_names": (
+                            context_package.selected_skill_names
+                        ),
                     },
                 )
 
@@ -134,7 +166,7 @@ class AgentHarness:
             for call in response.tool_calls:
                 result = await self.skill_executor.execute(
                     call,
-                    bound_versions=list(version.bound_skill_versions),
+                    bound_versions=selected_bound_versions,
                     granted_permissions=set(granted_permissions or set()),
                     execution_context=skill_context,
                 )
@@ -154,6 +186,26 @@ class AgentHarness:
                 )
 
         raise HarnessError("Agent Harness reached an unreachable tool-loop state")
+
+    def prepare_context(
+        self,
+        *,
+        version: AgentVersion,
+        user_input: str,
+        additional_context: list[str] | None = None,
+        relevant_memory: list[MemoryContextItem] | None = None,
+        granted_permissions: set[str] | None = None,
+    ) -> ContextPackage:
+        return self.context_builder.build(
+            system_instructions=version.system_instructions,
+            user_input=user_input,
+            additional_context=additional_context,
+            relevant_memory=relevant_memory,
+            skill_candidates=self._skill_context_items(version),
+            granted_permissions=set(granted_permissions or set()),
+            context_policy=dict(version.context_policy),
+            model_max_tokens=version.max_tokens,
+        )
 
     async def _invoke_model(
         self,
@@ -184,7 +236,32 @@ class AgentHarness:
         return response
 
     @staticmethod
-    def _tool_definitions(version: AgentVersion) -> list[ModelToolDefinition]:
+    def _skill_context_items(
+        version: AgentVersion,
+    ) -> list[SkillContextItem]:
+        return [
+            SkillContextItem(
+                name=skill_version.skill.name,
+                description=skill_version.skill.description,
+                input_schema=dict(skill_version.input_schema),
+                required_permissions=list(
+                    skill_version.required_permissions
+                ),
+                side_effect=skill_version.side_effect,
+            )
+            for skill_version in version.bound_skill_versions
+            if (
+                skill_version.skill.status == "active"
+                and skill_version.skill.name in selected_names
+            )
+        ]
+
+    @staticmethod
+    def _tool_definitions(
+        version: AgentVersion,
+        *,
+        selected_names: set[str],
+    ) -> list[ModelToolDefinition]:
         definitions = [
             ModelToolDefinition(
                 name=skill_version.skill.name,
