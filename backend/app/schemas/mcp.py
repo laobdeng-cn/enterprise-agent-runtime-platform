@@ -21,6 +21,17 @@ class MCPServerCreate(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class MCPServerUpdate(BaseModel):
+    description: str | None = Field(default=None, max_length=10000)
+    url: HttpUrl | None = None
+    status: Literal["active", "disabled"] | None = None
+    trust_level: Literal["first_party", "trusted", "untrusted"] | None = None
+    timeout_seconds: float | None = Field(default=None, ge=1.0, le=120.0)
+    auth_mode: Literal["none", "secret_ref"] | None = None
+    secret_ref: str | None = Field(default=None, max_length=255)
+    config: dict[str, Any] | None = None
+
+
 class MCPToolResponse(BaseModel):
     id: UUID
     name: str

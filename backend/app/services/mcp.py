@@ -17,7 +17,7 @@ from app.mcp.client import (
 from app.mcp.contracts import MCPHealthResult, MCPRemoteTool
 from app.models.mcp import MCPServer, MCPTool
 from app.models.skill import Skill, SkillVersion
-from app.schemas.mcp import MCPServerCreate
+from app.schemas.mcp import MCPServerCreate, MCPServerUpdate
 
 
 class MCPServerNotFoundError(LookupError):
@@ -109,6 +109,37 @@ async def create_mcp_server(
         raise MCPServerConflictError(
             f"MCP server name '{payload.name}' already exists"
         ) from exc
+    return await get_mcp_server(session, server.id)
+
+
+async def update_mcp_server(
+    session: AsyncSession,
+    server_id: UUID,
+    payload: MCPServerUpdate,
+) -> MCPServer:
+    server = await get_mcp_server(session, server_id)
+    values = payload.model_dump(exclude_unset=True)
+
+    if "url" in values and values["url"] is not None:
+        values["url"] = str(values["url"])
+    if "config" in values and values["config"] is not None:
+        values["config"] = dict(values["config"])
+
+    next_auth_mode = str(values.get("auth_mode", server.auth_mode))
+    next_secret_ref = values.get("secret_ref", server.secret_ref)
+    if next_auth_mode == "secret_ref" and not next_secret_ref:
+        raise ValueError(
+            "secret_ref is required when auth_mode='secret_ref'"
+        )
+    if next_auth_mode == "none":
+        next_secret_ref = None
+        values["secret_ref"] = None
+
+    for key, value in values.items():
+        if value is not None or key == "secret_ref":
+            setattr(server, key, value)
+
+    await session.commit()
     return await get_mcp_server(session, server.id)
 
 

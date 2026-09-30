@@ -14,13 +14,13 @@ from app.schemas.mcp import (
     MCPServerCreate,
     MCPServerResponse,
     MCPServerUpdate,
+    MCPToolResponse,
 )
 from app.services.mcp import (
+    MCPDiscoveryError,
     MCPServerConflictError,
-    MCPServerDisabledError,
     MCPServerNotFoundError,
-    MCPToolSyncError,
-    check_mcp_server,
+    check_mcp_health,
     create_mcp_server,
     discover_mcp_server,
     get_mcp_server,
@@ -39,19 +39,35 @@ def to_server_response(server: MCPServer) -> MCPServerResponse:
         id=server.id,
         name=server.name,
         description=server.description,
+        url=server.url,
         transport=server.transport,
-        endpoint_url=server.endpoint_url,
         status=server.status,
         trust_level=server.trust_level,
-        permission_mapping=dict(server.permission_mapping),
-        tool_cache=list(server.tool_cache),
-        protocol_version=server.protocol_version,
-        server_info=dict(server.server_info),
+        timeout_seconds=server.timeout_seconds,
+        auth_mode=server.auth_mode,
+        secret_ref=server.secret_ref,
+        config=dict(server.config),
         last_health_status=server.last_health_status,
+        last_health_error=server.last_health_error,
         last_health_at=server.last_health_at,
         last_discovered_at=server.last_discovered_at,
-        created_at=server.created_at,
-        updated_at=server.updated_at,
+        tools=[
+            MCPToolResponse(
+                id=tool.id,
+                name=tool.name,
+                description=tool.description,
+                input_schema=dict(tool.input_schema),
+                output_schema=dict(tool.output_schema),
+                annotations=dict(tool.annotations),
+                required_permissions=list(tool.required_permissions),
+                side_effect=tool.side_effect,
+                status=tool.status,
+                skill_id=tool.skill_id,
+                skill_name=tool.skill.name if tool.skill is not None else None,
+                discovered_at=tool.discovered_at,
+            )
+            for tool in server.tools
+        ],
     )
 
 
@@ -61,17 +77,12 @@ def _http_error(exc: Exception) -> HTTPException:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
-    if isinstance(exc, MCPServerDisabledError):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
-        )
     if isinstance(exc, MCPServerConflictError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         )
-    if isinstance(exc, MCPToolSyncError):
+    if isinstance(exc, (ValueError, MCPDiscoveryError)):
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
@@ -100,11 +111,15 @@ async def mcp_servers_index(
 )
 async def mcp_servers_create(
     payload: MCPServerCreate,
-    _: MCPManager,
+    principal: MCPManager,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> MCPServerResponse:
     try:
-        server = await create_mcp_server(session, payload)
+        server = await create_mcp_server(
+            session,
+            payload,
+            created_by_user_id=principal.id,
+        )
     except Exception as exc:
         raise _http_error(exc) from exc
     return to_server_response(server)
@@ -148,14 +163,14 @@ async def mcp_servers_health(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> MCPHealthResponse:
     try:
-        result = await check_mcp_server(session, server_id)
+        result = await check_mcp_health(session, server_id)
     except Exception as exc:
         raise _http_error(exc) from exc
     return MCPHealthResponse(
         server_id=server_id,
         status=result.status,
-        protocol_version=result.protocol_version,
-        server_info=result.server_info,
+        latency_ms=result.latency_ms,
+        tool_count=result.tool_count,
         error=result.error,
     )
 
@@ -170,7 +185,7 @@ async def mcp_servers_discover(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> MCPDiscoveryResponse:
     try:
-        result = await discover_mcp_server(
+        server, activated_skills, stale_tools = await discover_mcp_server(
             session,
             server_id,
         )
@@ -178,8 +193,10 @@ async def mcp_servers_discover(
         raise _http_error(exc) from exc
 
     return MCPDiscoveryResponse(
-        server=to_server_response(result.server),
-        discovered_tools=result.discovered_tools,
-        synchronized_skills=result.synchronized_skills,
-        disabled_skills=result.disabled_skills,
+        server=to_server_response(server),
+        discovered_tools=len(
+            [tool for tool in server.tools if tool.status == "active"]
+        ),
+        activated_skills=activated_skills,
+        stale_tools=stale_tools,
     )
