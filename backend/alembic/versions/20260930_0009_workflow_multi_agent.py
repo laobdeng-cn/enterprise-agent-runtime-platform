@@ -67,6 +67,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=128), nullable=False),
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("agent_id", sa.Uuid(), nullable=False),
+        sa.Column("agent_version_id", sa.Uuid(), nullable=False),
         sa.Column("depends_on", sa.JSON(), nullable=False),
         sa.Column("condition", sa.JSON(), nullable=False),
         sa.Column("instructions", sa.Text(), nullable=False),
@@ -74,12 +75,22 @@ def upgrade() -> None:
         sa.Column("max_attempts", sa.Integer(), nullable=False),
         sa.Column("position", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["agent_version_id"],
+            ["agent_versions.id"],
+            ondelete="RESTRICT",
+        ),
         sa.ForeignKeyConstraint(["workflow_version_id"], ["workflow_versions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("workflow_version_id", "node_key", name="uq_workflow_nodes_version_key"),
     )
     op.create_index("ix_workflow_nodes_workflow_version_id", "workflow_nodes", ["workflow_version_id"])
     op.create_index("ix_workflow_nodes_agent_id", "workflow_nodes", ["agent_id"])
+    op.create_index(
+        "ix_workflow_nodes_agent_version_id",
+        "workflow_nodes",
+        ["agent_version_id"],
+    )
 
     op.create_table(
         "workflow_runs",
@@ -164,6 +175,7 @@ def downgrade() -> None:
     op.drop_index("ix_workflow_runs_workflow_version_id", table_name="workflow_runs")
     op.drop_index("ix_workflow_runs_workflow_id", table_name="workflow_runs")
     op.drop_table("workflow_runs")
+    op.drop_index("ix_workflow_nodes_agent_version_id", table_name="workflow_nodes")
     op.drop_index("ix_workflow_nodes_agent_id", table_name="workflow_nodes")
     op.drop_index("ix_workflow_nodes_workflow_version_id", table_name="workflow_nodes")
     op.drop_table("workflow_nodes")
