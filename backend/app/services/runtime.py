@@ -264,8 +264,23 @@ async def create_run(
     payload: RunCreate,
 ) -> AgentRun:
     agent = await get_agent(session, payload.agent_id)
-    version = agent.active_version
+    if payload.agent_version_id is None:
+        version = agent.active_version
+    else:
+        version = next(
+            (
+                candidate
+                for candidate in agent.versions
+                if candidate.id == payload.agent_version_id
+            ),
+            None,
+        )
     if version is None:
+        if payload.agent_version_id is not None:
+            raise AgentHasNoActiveVersionError(
+                f"AgentVersion {payload.agent_version_id} is not available "
+                f"for Agent {agent.id}"
+            )
         raise AgentHasNoActiveVersionError(
             f"Agent {agent.id} has no active version"
         )
