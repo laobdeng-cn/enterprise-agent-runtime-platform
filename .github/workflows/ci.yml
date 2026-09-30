@@ -165,9 +165,9 @@ jobs:
 
           MCP_AGENT_ID=$(printf '%s' "$CREATED" | python -c \
             "import json,sys; d=json.load(sys.stdin); assert 'knowledge_search_documents' in d['versions'][0]['skills']; print(d['id'])")
+          export MCP_AGENT_ID
 
-          RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["MCP_AGENT_ID"],"input":"Search internal perovskite knowledge documents.","additional_context":[],"max_attempts":1}))' \
-            MCP_AGENT_ID="$MCP_AGENT_ID")
+          RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["MCP_AGENT_ID"],"input":"Search internal perovskite knowledge documents.","additional_context":[],"max_attempts":1}))')
           CREATED_RUN=$(curl --fail --silent --show-error \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Content-Type: application/json' \
