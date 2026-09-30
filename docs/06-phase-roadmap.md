@@ -186,15 +186,24 @@ Implemented:
 
 ## Phase 10 — MCP & Enterprise Data
 
-Implement:
+**Status: implemented.**
 
-- MCP client registry;
-- server health and discovery;
+Implemented:
+
+- durable MCPServer / MCPTool registry;
+- Streamable HTTP MCP client boundary;
+- protected server health/discovery APIs;
 - MCP Skill adapter;
+- remote schema validation and SkillVersion synchronization;
+- stale capability detection;
+- platform-owned connector permission mapping;
+- platform-owned side-effect policy with SENSITIVE safe default;
+- current-principal authorization re-check before remote execution;
 - first-party knowledge, experiment and enterprise MCP servers;
-- connector permission mapping.
+- MCP Server Registry UI;
+- Docker Compose MCP integration testing.
 
-**Exit criteria:** a Run dynamically discovers and safely calls at least one MCP-provided capability.
+**Exit criteria:** the platform discovers first-party MCP capabilities, persists/synchronizes them into governed Skills, completes a real MCP-backed Skill round trip, and includes a relevant MCP Skill in Context Engineering without allowing the remote server to grant authorization.
 
 ---
 
