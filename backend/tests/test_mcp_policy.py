@@ -1,7 +1,9 @@
 from app.mcp.contracts import MCPRemoteTool
-from app.models.mcp import MCPServer
+from app.models.mcp import MCPServer, MCPTool
+from app.models.skill import Skill
 from app.services.mcp import (
     _default_side_effect,
+    _invalidate_discovered_tools,
     _skill_name,
     _tool_permissions,
 )
@@ -66,3 +68,34 @@ def test_mcp_skill_name_is_namespaced_by_server() -> None:
         _skill_name(server, "search_documents")
         == "knowledge_search_documents"
     )
+
+
+def test_connector_change_invalidates_discovered_capabilities() -> None:
+    server = build_server()
+    skill = Skill(
+        name="knowledge_search_documents",
+        description="Search knowledge",
+        provider_type="mcp",
+        status="active",
+    )
+    tool = MCPTool(
+        name="search_documents",
+        description="Search knowledge",
+        input_schema={},
+        output_schema={},
+        annotations={},
+        required_permissions=[
+            "skill:execute",
+            "mcp:execute",
+            "knowledge:read",
+        ],
+        side_effect="READ_ONLY",
+        status="active",
+        skill=skill,
+    )
+    server.tools = [tool]
+
+    _invalidate_discovered_tools(server, status="stale")
+
+    assert tool.status == "stale"
+    assert skill.status == "disabled"
