@@ -259,7 +259,8 @@ jobs:
 
           MCP_AGENT_ID=$(printf '%s' "$CREATED" | python -c             "import json,sys; d=json.load(sys.stdin); assert {'knowledge_search_documents','experiment_search_experiments','enterprise_query_inventory'} <= set(d['versions'][0]['skills']); print(d['id'])")
 
-          MCP_RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["MCP_AGENT_ID"],"input":"Search internal knowledge documents for perovskite thin-film guidance.","additional_context":[],"max_attempts":2}))' MCP_AGENT_ID="$MCP_AGENT_ID")
+          export MCP_AGENT_ID
+          MCP_RUN_PAYLOAD=$(python -c 'import json,os; print(json.dumps({"agent_id":os.environ["MCP_AGENT_ID"],"input":"Search internal knowledge documents for perovskite thin-film guidance.","additional_context":[],"max_attempts":2}))')
           MCP_RUN=$(curl --fail --silent --show-error             -H "Authorization: Bearer $TOKEN"             -H 'Content-Type: application/json'             -d "$MCP_RUN_PAYLOAD"             http://localhost:8000/api/runs)
 
           MCP_RUN_ID=$(printf '%s' "$MCP_RUN" | python -c             "import json,sys; print(json.load(sys.stdin)['id'])")
