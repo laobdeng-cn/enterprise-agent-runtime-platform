@@ -148,6 +148,47 @@ interface MemoryRecord {
   score?: number;
 }
 
+interface ContextDecision {
+  component_id: string;
+  kind: "system" | "user" | "additional_context" | "memory" | "skill" | "tool_history";
+  label: string;
+  status: "included" | "compressed" | "excluded";
+  reason: string;
+  priority: number;
+  original_tokens: number;
+  used_tokens: number;
+  score: number | null;
+  preview: string;
+}
+
+interface ContextBudget {
+  context_window_tokens: number;
+  reserved_output_tokens: number;
+  runtime_reserve_tokens: number;
+  input_budget_tokens: number;
+  initial_budget_tokens: number;
+  used_tokens: number;
+  remaining_tokens: number;
+  message_tokens: number;
+  tool_tokens: number;
+}
+
+interface ContextTrace {
+  budget: ContextBudget;
+  decisions: ContextDecision[];
+  selected_skill_names: string[];
+  excluded_skill_names: string[];
+  compression_count: number;
+  policy: Record<string, unknown>;
+}
+
+interface ContextInspection {
+  run_id: string;
+  agent_version_id: string;
+  source: "preview" | "persisted";
+  trace: ContextTrace;
+}
+
 interface SandboxResult {
   execution_id: string;
   run_id: string;
@@ -172,7 +213,7 @@ interface SandboxResult {
 const backend = ref<DependencyState>("checking");
 const database = ref<DependencyState>("checking");
 const redis = ref<DependencyState>("checking");
-const version = ref("0.8.0");
+const version = ref("0.9.0");
 
 const username = ref("");
 const password = ref("");
@@ -210,6 +251,9 @@ const memoryContent = ref("");
 const memoryImportance = ref(0.7);
 const memoryLoading = ref(false);
 const memoryError = ref("");
+const contextInspection = ref<ContextInspection | null>(null);
+const contextLoading = ref(false);
+const contextError = ref("");
 
 const overallType = computed(() => {
   if (backend.value === "checking") return "info";
@@ -473,6 +517,25 @@ async function createRun(): Promise<void> {
   }
 }
 
+async function inspectContext(run: RunRecord): Promise<void> {
+  if (!canReadRuns.value) return;
+  selectedRunId.value = run.id;
+  contextLoading.value = true;
+  contextError.value = "";
+  try {
+    const response = await apiFetch(`/api/runs/${run.id}/context`);
+    if (!response.ok) {
+      contextError.value = await response.text();
+      return;
+    }
+    contextInspection.value = (await response.json()) as ContextInspection;
+  } catch {
+    contextError.value = "Context Inspector API is unavailable.";
+  } finally {
+    contextLoading.value = false;
+  }
+}
+
 async function inspectWorkspace(run: RunRecord): Promise<void> {
   if (!canReadWorkspace.value) return;
   workspaceLoading.value = true;
@@ -570,6 +633,9 @@ async function runAction(run: RunRecord, action: "start" | "resume" | "cancel"):
       return;
     }
     await loadRuns();
+    if (selectedRunId.value === run.id) {
+      await inspectContext(run);
+    }
   } catch {
     runtimeError.value = `Run ${action} failed.`;
   } finally {
@@ -601,6 +667,8 @@ function logout(): void {
   memoryQuery.value = "";
   memoryContent.value = "";
   memoryError.value = "";
+  contextInspection.value = null;
+  contextError.value = "";
   sessionStorage.removeItem("earp_access_token");
 }
 
@@ -622,15 +690,15 @@ onMounted(async () => {
     <section class="hero">
       <div>
         <p class="eyebrow">Enterprise Agent Runtime Platform</p>
-        <h1>Durable Memory System</h1>
+        <h1>Context Engineering Pipeline</h1>
         <p class="subtitle">
-          Phase 8 adds scoped Conversation, Task, Long-term, and Semantic Memory with
-          explicit retention, relevance retrieval, governed Agent writes, and safe
-          context injection.
+          Phase 9 adds token budgeting, relevance-based Skill selection, bounded Memory
+          and additional-context compression, runtime tool-history control, and an
+          inspectable inclusion/exclusion trace for every Run.
         </p>
       </div>
       <el-tag :type="overallType" size="large" effect="dark">
-        Phase 8 · v{{ version }}
+        Phase 9 · v{{ version }}
       </el-tag>
     </section>
 
@@ -697,13 +765,15 @@ onMounted(async () => {
       </el-card>
 
       <el-card shadow="never">
-        <template #header><strong>Memory boundary</strong></template>
+        <template #header><strong>Context pipeline</strong></template>
         <div class="flow">
-          <span>USER</span><span>→</span><span>AGENT</span><span>→</span><span>RUN</span>
+          <span>System/User</span><span>→</span><span>Budget</span><span>→</span>
+          <span>Memory + Skills</span><span>→</span><span>DeepSeek</span>
         </div>
         <p class="muted">
-          Conversation history is not automatically Memory. Durable Memory is explicit,
-          scoped, permission-gated, expiry-aware, and injected as untrusted contextual data.
+          Authoritative input is never silently truncated. Lower-priority context is
+          ranked, compressed or excluded under an explicit token budget and every
+          decision is inspectable.
         </p>
       </el-card>
     </section>
@@ -935,6 +1005,16 @@ onMounted(async () => {
             Resume
           </el-button>
           <el-button
+            v-if="canReadRuns"
+            size="small"
+            type="info"
+            plain
+            :loading="contextLoading && selectedRunId === run.id"
+            @click="inspectContext(run)"
+          >
+            Context
+          </el-button>
+          <el-button
             v-if="canReadWorkspace"
             size="small"
             plain
@@ -953,6 +1033,104 @@ onMounted(async () => {
           >
             Cancel
           </el-button>
+        </div>
+      </div>
+    </el-card>
+
+    <el-card
+      v-if="currentUser && contextInspection"
+      class="status-card result-block"
+      shadow="never"
+    >
+      <template #header>
+        <div class="card-header">
+          <strong>Context Inspector</strong>
+          <div class="tag-list">
+            <el-tag :type="contextInspection.source === 'persisted' ? 'success' : 'info'">
+              {{ contextInspection.source }}
+            </el-tag>
+            <el-tag type="info">{{ contextInspection.run_id }}</el-tag>
+          </div>
+        </div>
+      </template>
+
+      <el-alert
+        v-if="contextError"
+        :title="contextError"
+        type="error"
+        :closable="false"
+        class="result-block"
+      />
+
+      <div class="status-grid">
+        <div class="status-item">
+          <span>Initial budget</span>
+          <strong>{{ contextInspection.trace.budget.initial_budget_tokens }}</strong>
+        </div>
+        <div class="status-item">
+          <span>Used</span>
+          <strong>{{ contextInspection.trace.budget.used_tokens }}</strong>
+        </div>
+        <div class="status-item">
+          <span>Remaining</span>
+          <strong>{{ contextInspection.trace.budget.remaining_tokens }}</strong>
+        </div>
+        <div class="status-item">
+          <span>Runtime reserve</span>
+          <strong>{{ contextInspection.trace.budget.runtime_reserve_tokens }}</strong>
+        </div>
+      </div>
+
+      <div class="result-block">
+        <p><strong>Selected Skills</strong></p>
+        <div class="tag-list">
+          <el-tag
+            v-for="skillName in contextInspection.trace.selected_skill_names"
+            :key="skillName"
+            type="success"
+          >
+            {{ skillName }}
+          </el-tag>
+          <el-tag
+            v-if="contextInspection.trace.selected_skill_names.length === 0"
+            type="info"
+          >
+            no Skill injected
+          </el-tag>
+        </div>
+      </div>
+
+      <div class="agent-grid result-block">
+        <div
+          v-for="decision in contextInspection.trace.decisions"
+          :key="decision.component_id"
+          class="status-item"
+        >
+          <div>
+            <div class="tag-list">
+              <el-tag type="info">{{ decision.kind }}</el-tag>
+              <el-tag
+                :type="
+                  decision.status === 'included'
+                    ? 'success'
+                    : decision.status === 'compressed'
+                      ? 'warning'
+                      : 'danger'
+                "
+              >
+                {{ decision.status }}
+              </el-tag>
+              <el-tag v-if="decision.score !== null" type="info">
+                score {{ decision.score.toFixed(3) }}
+              </el-tag>
+            </div>
+            <p><strong>{{ decision.label }}</strong></p>
+            <p class="muted">
+              {{ decision.reason }} · {{ decision.used_tokens }}/{{ decision.original_tokens }}
+              estimated token(s) · priority {{ decision.priority }}
+            </p>
+            <p v-if="decision.preview" class="muted">{{ decision.preview }}</p>
+          </div>
         </div>
       </div>
     </el-card>
