@@ -44,6 +44,7 @@ class WorkflowNodeResponse(BaseModel):
     name: str
     role: str
     agent_id: UUID
+    agent_version_id: UUID
     depends_on: list[str]
     condition: dict[str, Any]
     instructions: str
