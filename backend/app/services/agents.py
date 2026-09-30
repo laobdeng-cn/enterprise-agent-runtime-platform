@@ -5,13 +5,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agents.harness.contracts import HarnessResult
+from app.agents.harness.contracts import HarnessResult, MemoryContextItem
 from app.agents.harness.runner import AgentHarness
+from app.core.config import settings
 from app.models.agent import Agent, AgentVersion
 from app.models.identity import User
 from app.models.skill import SkillVersion
 from app.schemas.agent import AgentCreate, AgentVersionCreate
 from app.services.auth import permission_codes
+from app.services.memory import memory_retriever
 from app.services.skills import resolve_active_skill_versions
 
 
@@ -192,10 +194,34 @@ async def invoke_active_agent(
             f"Agent {agent_id} has no active version"
         )
 
+    ranked_memories = await memory_retriever.retrieve(
+        session,
+        owner_user_id=principal.id,
+        query=user_input,
+        agent_id=agent.id,
+        limit=settings.memory_context_limit,
+        track_access=True,
+    )
+    relevant_memory = [
+        MemoryContextItem(
+            id=item.memory.id,
+            memory_type=item.memory.memory_type,
+            scope=item.memory.scope,
+            content=item.memory.content,
+            score=item.score,
+            importance=item.memory.importance,
+            source=item.memory.source,
+        )
+        for item in ranked_memories
+    ]
+    if ranked_memories:
+        await session.commit()
+
     return await harness.run(
         agent_id=agent.id,
         version=version,
         user_input=user_input,
         additional_context=additional_context,
         granted_permissions=permission_codes(principal),
+        relevant_memory=relevant_memory,
     )

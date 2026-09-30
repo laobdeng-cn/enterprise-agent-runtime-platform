@@ -7,9 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agents.harness.contracts import HarnessResult
+from app.agents.harness.contracts import HarnessResult, MemoryContextItem
 from app.agents.harness.errors import ProviderError
 from app.agents.harness.runner import AgentHarness
+from app.core.config import settings
 from app.models.agent import AgentVersion
 from app.models.identity import User
 from app.models.runtime import AgentRun, RunCheckpoint, RunEvent, RunStep, ToolCall
@@ -25,6 +26,7 @@ from app.runtime.state_machine import (
 from app.schemas.runtime import RunCreate
 from app.services.agents import AgentHasNoActiveVersionError, get_agent
 from app.services.auth import get_user_by_id, permission_codes
+from app.services.memory import memory_retriever
 from app.services.workspaces import create_workspace
 from app.skills.contracts import SkillExecutionContext
 
@@ -536,6 +538,41 @@ async def execute_run(
             return await get_run(session, run.id, principal=principal)
 
         try:
+            ranked_memories = await memory_retriever.retrieve_for_run(
+                session,
+                run=run,
+                principal_id=execution_principal.id,
+                query=run.input_text,
+                limit=settings.memory_context_limit,
+            )
+            relevant_memory = [
+                MemoryContextItem(
+                    id=item.memory.id,
+                    memory_type=item.memory.memory_type,
+                    scope=item.memory.scope,
+                    content=item.memory.content,
+                    score=item.score,
+                    importance=item.memory.importance,
+                    source=item.memory.source,
+                )
+                for item in ranked_memories
+            ]
+
+            persisted_memory_step = await session.get(
+                RunStep,
+                model_step.id,
+            )
+            if persisted_memory_step is not None:
+                persisted_memory_step.input_data = {
+                    **persisted_memory_step.input_data,
+                    "memory_ids": [
+                        str(item.id)
+                        for item in relevant_memory
+                    ],
+                    "memory_count": len(relevant_memory),
+                }
+            await session.commit()
+
             result = await harness.run(
                 agent_id=run.agent_id,
                 version=version,
@@ -546,6 +583,7 @@ async def execute_run(
                     run_id=run.id,
                     principal_id=execution_principal.id,
                 ),
+                relevant_memory=relevant_memory,
             )
         except Exception as exc:
             error = _normalize_error(exc)
